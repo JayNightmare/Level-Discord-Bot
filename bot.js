@@ -71,7 +71,9 @@ client.on('shardResume', (shardId) => {
     sendStatusMessage(`Shard ${shardId} is back online.`);
 });
 
+// ! Change if you want to give roles at different levels.
 const milestoneLevels = [3, 5, 9, 14, 15];
+
 const cooldowns = new Map();
 
 // * Message handling
@@ -88,7 +90,7 @@ client.on('messageCreate', async message => {
 
         if (!message.content.startsWith(prefix)) {
             const now = Date.now();
-            const cooldownAmount = 60 * 1000; // 60 seconds
+            const cooldownAmount = 60 * 1000; // ! 60 seconds
 
             if (cooldowns.has(userId)) {
                 const expirationTime = cooldowns.get(userId) + cooldownAmount;
@@ -114,12 +116,12 @@ client.on('messageCreate', async message => {
             }
 
             let user = data.users[userId];
-            const xpGain = Math.floor(Math.random() * 5) + 5; // Gain 5-10 XP per message
+            const xpGain = Math.floor(Math.random() * 5) + 5; // * Gain 5-10 XP per message
             user.xp += xpGain;
 
             const level = user.level;
-            const x = 100; // base multiplier
-            const y = 1.1; // scaling factor
+            const x = 100; // * base multiplier
+            const y = 1.1; // * scaling factor
 
             const xpNeededForCurrentLevel = Math.floor(level * x * Math.pow(y, level));
             const xpNeededForNextLevel = Math.floor((level + 1) * x * Math.pow(y, level + 1));
@@ -339,6 +341,7 @@ client.on('messageCreate', async message => {
 });
 
 async function manageRoles(member, level, guild, message) {
+    // ! Change to the name of the roles 
     const roles = {
         3: 'Certified Soldier',
         5: 'Soldier with rizz 😎',
@@ -348,7 +351,7 @@ async function manageRoles(member, level, guild, message) {
     };
 
     try {
-        // Remove previous roles at level 15
+        // ! Remove previous roles at level 15
         if (level === 15) {
             for (let lvl in roles) {
                 if (member.roles.cache.some(role => role.name === roles[lvl])) {
@@ -361,7 +364,7 @@ async function manageRoles(member, level, guild, message) {
             }
         }
 
-        // Add the new role for the current level
+        // ! Add the new role for the current level
         if (roles[level]) {
             const role = guild.roles.cache.find(r => r.name === roles[level]);
             if (role) {
