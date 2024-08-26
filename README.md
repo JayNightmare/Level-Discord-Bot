@@ -1,7 +1,7 @@
 # Level Bot
 This bot will keep track of user levels. Has anti spam measures and has commands for QOL 
 
-## Install guide:
+## Installation guide:
 ### Step 1:
 Use `npm init -y` `npm install discord.js` to install discord.js.
 
