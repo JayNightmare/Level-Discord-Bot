@@ -47,20 +47,32 @@ Go back to the portal and go to `Bot -> Privileged Gateway Intents` and enable a
 ---
 
 ### Step 5:
-If you have a logging channel, put the channel ID in the `.env`. For example, `LOGGING_CHANNEL=channel id`.
-
 After all that, run `bot.js`.
 
 ---
 
 ## Modification Guide:
 To modify the code to fit your needs, here is what you need to change.
-1. Line 343 -> `manageRoles` function. Change `const roles` to roles you want users to gain when they level up. Leave blank if you want to (`const roles = {}`).
+1. Line 597 -> `try` section, change if statement if you want a specific role to do something. For example, level 15 removes all previous roles. Remove if you don't want it.
 
-2. Line 75 -> change `milestoneLevels` to the level you want to give roles. If you don't want milestone levels, leave blank (`const milestoneLevels = []`).
+2. Optionally changes:
+    - Line 129 -> `cooldownAmount` - change if you want the cooldown to be longer or shorter. Default is set to 60 seconds.
+    - Line 159 -> `x` is the base multiplier and `y` is the scaling factor. Change the `x` to increase/decrease the `user.level` multiplication xp. Change the `y` for the increase of xp after each level.
 
-3. Line 353 -> `try` section, change if statement if you want a specific role to do something. For example, level 15 removes all previous roles. Remove if you don't want it.
-
-4. Optionally changes:
-    - Line 93 -> `cooldownAmount` - change if you want the cooldown to be longer or shorter. Default is set to 60 seconds.
-    - Line 123 -> `x` is the base multiplier and `y` is the scaling factor. Change the `x` to increase/decrease the `user.level` multiplication xp. Change the `y` for the increase of xp after each level.
+## Commands:
+To see the commands in discord, run the `!help` command.
+<code align=center>
+| Command             | Description                          |
+|---------------------|--------------------------------------|
+| `!setrankchannel`    | Set the rank check channel.          |
+| `!unsetrankchannel`  | Unset the rank check channel.        |
+| `!setlogchannel`     | Set the log channel.                 |
+| `!viewsettings`      | View current settings.               |
+| `!blacklist`         | Blacklist channels.                  |
+| `!unblacklist`       | Unblacklist channels.                |
+| `!rank`              | View your rank.                      |
+| `!checkrole`         | Check your roles.                    |
+| `!setlevels`         | Set milestone levels.                |
+| `!setroles`          | Set milestone roles.                 |
+| `!help`              | Display help.                        |
+</code>
