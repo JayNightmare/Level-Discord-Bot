@@ -172,7 +172,7 @@ client.on('messageCreate', async message => {
                 user.level++;
                 user.xp -= xpForNextLevel;
 
-                if (milestoneLevels.includes(user.level)) {
+                if (data[serverId].milestoneLevels.includes(level)) {
                     message.channel.send(`🎉 Congrats <@${message.author.id}>! You've reached level ${user.level}! This is a milestone level!`);
                 } else {
                     message.channel.send(`${message.author.username} leveled up to level ${user.level}!`);
@@ -619,7 +619,7 @@ async function manageRoles(member, level, guild, message) {
         }
     } catch (error) {
         console.error(`Failed to manage roles for ${member.user.username}:`, error);
-        message.channel.send(`Contact Admin: **Error 71a**`);
+        await message.channel.send(`Contact Admin: **Error 71a**`);
     }
 }
 
