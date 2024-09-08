@@ -351,7 +351,7 @@ async function notifyUpdate(client) {
                 const messageToServers = `
                 ***THE BOT WILL BE UPDATING SHORTLY***
 
-                No XP will be gained after this message until the "Pushing Update to Server" has disappeared from the bot status (roughly 20-30 mins). 
+                All xp will be reset to the 6th of Auguest as that's when I pulled the data. Good chance to use the new commands than 👀 
 
                 **New Update:**
                 - **This message!** - You will be notified when the bot updates in your log channel (if none is set, it will send to the next publicly available channel).\n
