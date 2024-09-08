@@ -14,8 +14,14 @@
     </a>
     <br />
     <br />
-  </p>
-
+    <div align="center">
+        <p>Top.gg Stats</p>
+        <a href="https://top.gg/bot/1278098225353719869">
+          <img src="https://top.gg/api/widget/upvotes/1278098225353719869.svg">
+        </a>
+    </div>
+    
+</p>
 <p align="center">This bot will keep track of user levels. Has anti spam measures and has commands for QOL</p>
 
 ## Have a bug?
