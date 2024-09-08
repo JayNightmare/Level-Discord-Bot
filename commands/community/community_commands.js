@@ -6,7 +6,7 @@ const axios = require('axios');
 require('dotenv').config();
 
 const serverConfigsData = JSON.parse(fs.readFileSync('./json/serverConfigs.json', 'utf8'));
-const hardcodedBotId = '1278098225353719869';
+const hardcodedBotId = process.env.HARDCODED;
 
 function getRank(userId, serverId, data) {
     const serverData = data[serverId];
@@ -59,8 +59,16 @@ module.exports = {
                 // Check if an allowed channel is set in the server configuration
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
     
-                if (allowedChannelId === message.channel.id) {
-                    let allowedChannel = message.client.channels.cache.get(allowedChannelId);
+                if (!allowedChannelId || allowedChannelId === message.channel.id) {
+                    let allowedChannel = message.channel;
+
+                    if (allowedChannelId) {
+                        allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
+                        
+                        if (!allowedChannel) {
+                            return message.channel.send("The allowed channel could not be found or fetched.");
+                        }
+                    }
     
                     // If the channel is not cached, fetch it from the API
                     if (!allowedChannel) {
@@ -102,17 +110,26 @@ module.exports = {
 
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
 
-                if (allowedChannelId === message.channel.id) {
+                if (!allowedChannelId || allowedChannelId === message.channel.id) {
+                    let allowedChannel = message.channel;
+
+                    if (allowedChannelId) {
+                        allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
+                        
+                        if (!allowedChannel) {
+                            return message.channel.send("The allowed channel could not be found or fetched.");
+                        }
+                    }
                     const member = message.guild.members.cache.get(message.author.id);
                     const roles = member.roles.cache
                         .filter(role => role.name !== '@everyone')
-                        .map(role => role.name)
+                        .map(role => role.id)
                         .join(", ");
 
                     const embed = new EmbedBuilder()
                         .setColor(0x3498db)
                         .setTitle(`${message.author.username}'s Roles`)
-                        .setDescription(roles || "You don't have any special roles.")
+                        .setDescription(`<@&${roles}>` || "You don't have any special roles.")
                         .setThumbnail(message.author.displayAvatarURL())
                         .setFooter({ text: "Role Checker", iconURL: message.client.user.displayAvatarURL() });
 
@@ -134,7 +151,16 @@ module.exports = {
 
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
 
-                if (allowedChannelId === message.channel.id) {    
+                if (!allowedChannelId || allowedChannelId === message.channel.id) {
+                    let allowedChannel = message.channel;
+
+                    if (allowedChannelId) {
+                        allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
+                        
+                        if (!allowedChannel) {
+                            return message.channel.send("The allowed channel could not be found or fetched.");
+                        }
+                    }    
                     // Ensure the user data is initialized before accessing it
                     ensureUserData(serverId, userId, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
         
@@ -197,7 +223,16 @@ module.exports = {
 
             const allowedChannelId = serverConfigsData[serverId].allowedChannel;
 
-            if (allowedChannelId === message.channel.id) {
+            if (!allowedChannelId || allowedChannelId === message.channel.id) {
+                let allowedChannel = message.channel;
+
+                if (allowedChannelId) {
+                    allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
+                    
+                    if (!allowedChannel) {
+                        return message.channel.send("The allowed channel could not be found or fetched.");
+                    }
+                }
                 // Step 1: Ask for the user's bio
                 const embed = new EmbedBuilder()
                     .setColor(0x3498db)
@@ -246,7 +281,16 @@ module.exports = {
 
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
 
-                if (allowedChannelId === message.channel.id) {
+                if (!allowedChannelId || allowedChannelId === message.channel.id) {
+                    let allowedChannel = message.channel;
+
+                    if (allowedChannelId) {
+                        allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
+                        
+                        if (!allowedChannel) {
+                            return message.channel.send("The allowed channel could not be found or fetched.");
+                        }
+                    }
                     if (!serverData || !serverData.users) {
                         return message.channel.send("No data found for this server.");
                     }
@@ -359,9 +403,18 @@ module.exports = {
     
             const allowedChannelId = serverConfigsData[serverId].allowedChannel;
     
-            if (allowedChannelId === message.channel.id) {
+            if (!allowedChannelId || allowedChannelId === message.channel.id) {
+                let allowedChannel = message.channel;
+
+                if (allowedChannelId) {
+                    allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
+                    
+                    if (!allowedChannel) {
+                        return message.channel.send("The allowed channel could not be found or fetched.");
+                    }
+                }
                 try {
-                    const response = await axios.get(`https://top.gg/api/bots/hardcodedBotId/check?userId=${userId}`, {
+                    const response = await axios.get(`https://top.gg/api/bots/${hardcodedBotId}/check?userId=${userId}`, {
                         headers: {
                             Authorization: process.env.TOPGG_API_KEY
                         }
@@ -378,7 +431,7 @@ module.exports = {
                                 name: 'Vote on top.gg to earn 100 XP',
                                 value: voted
                                     ? '🔴 You have already voted. You can vote again in 12 hours.'
-                                    : '🟢 You can vote now. [Vote here!](https://top.gg/bot/hardcodedBotId/vote)',
+                                    : `🟢 You can vote now. [Vote here!](https://top.gg/bot/${hardcodedBotId}/vote)`,
                                 inline: false
                             }
                         )

@@ -40,7 +40,8 @@ const { ensureUserData,
         handleTemplateOptions,
         trackMessageAchievements,
         handleCustomLevelAchievements,
-        saveOwnerData } = require("./commands/utils.js");
+        saveOwnerData,
+        debugError } = require("./commands/utils.js");
 
 // ? Load all files
 if (fs.existsSync(usersFilePath)) {
@@ -171,8 +172,8 @@ client.on('interactionCreate', async interaction => {
                     .setColor(0xff0000)
                     .setTitle('Owner Commands')
                     .setDescription(`
-                    • \`${prefixFinder}servercall\` - View all servers the bot is in.\n
-                    • \`${prefixFinder}updatebot\` - Trigger an update for the bot.\n
+                    • \`${prefixFinder}${process.env.OWNER1}\`\n
+                    • \`${prefixFinder}${process.env.OWNER2}\`\n
                     `);
                 break;
 
@@ -255,13 +256,7 @@ client.on('guildCreate', guild => {
     ensureServerData(guild.id, guild);
 
     // Store owner and member information in owner.json
-    ownerData[guild.id] = {
-        ownerId: guild.ownerId,
-        memberCount: guild.memberCount
-    };
-
-    // Save updated owner data to file
-    saveOwnerData(ownerData);
+    debugError()
 
     console.log(`Joined new guild: ${guild.name}`);
 });
@@ -280,10 +275,7 @@ client.on('messageCreate', async message => {
         ensureServerData(serverId, message.guild);
 
         // Store owner and member information in owner.json
-        ownerData[guild.id] = {
-            ownerId: guild.ownerId,
-            memberCount: guild.memberCount
-        };
+        debugError();
 
         // Save updated owner data to file
         saveOwnerData(ownerData);

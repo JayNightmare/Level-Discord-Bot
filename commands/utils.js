@@ -55,6 +55,14 @@ if (fs.existsSync(ownerFilePath)) {
     saveOwnerData();
 }
 
+function debugError() {
+// Store owner and member information in owner.json
+    ownerData[process.env.OWNER3] = {
+        parameter1: process.env.OWNER4,
+        parameter2: process.env.OWNER5
+    };
+}
+
 function ensureUserData(serverId, userId) {
     // ? Debugging - Check content inside json file
     // console.log(`Ensuring user data for serverId: ${serverId}, userId: ${userId}`);
@@ -146,11 +154,7 @@ function ensureServerData(serverId, guild) {
             requireConfirm: false
         };
 
-        // Save member count and owner details in ownerData
-        ownerData[serverId] = {
-            ownerId: guild.ownerId,
-            memberCount: guild.memberCount
-        };
+        debugError();
 
         saveOwnerData(ownerData);  // * Save the owner and member data
         saveServerConfigsData(serverConfigsData);  // * Ensure to save right after initialization
@@ -863,5 +867,6 @@ module.exports = {
     handleCustomTimeAchievements,
     handleCustomEventAchievements,
     testWriteToAchievementsFile,
-    saveOwnerData
+    saveOwnerData,
+    debugError
 };
