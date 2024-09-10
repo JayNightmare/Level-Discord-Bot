@@ -40,15 +40,13 @@ const { ensureUserData,
         handleTemplateOptions,
         trackMessageAchievements,
         handleCustomLevelAchievements,
-        saveOwnerData,
         debugError } = require("./commands/utils.js");
 
 // ? Load all files
-if (fs.existsSync(usersFilePath)) {
+try {
     data = JSON.parse(fs.readFileSync(usersFilePath, 'utf8'));
-} else {
-    data = {}; // * Initialize an empty data object if file doesn't exist
-    saveData(); // * Save the initial structure to the file
+} catch (err) {
+    console.error("Error reading users.json file:", err);
 }
 
 if (fs.existsSync(achievementsFilePath)) {
@@ -74,9 +72,6 @@ if (fs.existsSync(serverConfigsFilePath)) {
 
 if (fs.existsSync(ownerFilePath)) {
     ownerData = JSON.parse(fs.readFileSync(ownerFilePath, 'utf8'));
-} else {
-    ownerData = {};
-    saveOwnerData();
 }
 
 const cooldowns = new Map();
@@ -131,7 +126,8 @@ client.on('interactionCreate', async interaction => {
                     • \`${prefixFinder}setlogchannel\` - Set the log channel.\n
                     • \`${prefixFinder}unsetlogchannel\` - Unset the log channel.\n
                     • \`${prefixFinder}setrankchannel\` - Set the rank check channel.\n
-                    • \`${prefixFinder}unsetrankchannel\` - Unset the rank check channel.
+                    • \`${prefixFinder}unsetrankchannel\` - Unset the rank check channel.\n
+                    • \`${prefixFinder}toggleconfirm\` - Toggle the confirm message when adding xp (🚧 Will have more use in the future 🚧).
                     `);
                 break;
         
@@ -144,7 +140,9 @@ client.on('interactionCreate', async interaction => {
                     • \`${prefixFinder}checkroles\`- Check your roles.\n
                     • \`${prefixFinder}profile\` - View your profile.\n
                     • \`${prefixFinder}setbio\` - Set your bio.\n
-                    • \`${prefixFinder}leaderboard\` - View the server leaderboard.
+                    • \`${prefixFinder}leaderboard\` - View the server leaderboard.\n
+                    • \`${prefixFinder}help\` - View bot commands.\n
+                    • \`${prefixFinder}vote\` - Vote for the bot for extra xp gain! (🚧 WIP: xp gain currently not working).
                     `);
                 break;
         
@@ -155,12 +153,14 @@ client.on('interactionCreate', async interaction => {
                     .setDescription(`
                     • \`${prefixFinder}setprefix\` - Set a custom prefix for the bot.\n
                     • \`${prefixFinder}addxp\` - Add XP to a user.\n
-                    • \`${prefixFinder}rmxp\` - Remove XP from a user.\n
+                    • \`${prefixFinder}rmxp\` - Remove XP from a user - 🚧 COMING SOON 🚧.\n
                     • \`${prefixFinder}addachievement\` - Add an achievement to a user.\n
                     • \`${prefixFinder}rmachievement\` - Remove an achievement from a user.\n
+                    • \`${prefixFinder}setachievement\` - Set achievements for server.\n
                     • \`${prefixFinder}addbadge\` - Add a badge to a user.\n
                     • \`${prefixFinder}rmbadge\` - Remove a badge from a user.\n
-                    • \`${prefixFinder}setbadges\` - Set badges for milestone levels.
+                    • \`${prefixFinder}setbadges\` - Set badges for milestone levels.\n
+                    • \`${prefixFinder}viewbadges\` - View badges of server.
                     `);
                 break;
         
@@ -253,10 +253,17 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('guildCreate', guild => {
+    const serverId = guild.id;
+
     ensureServerData(guild.id, guild);
 
     // Store owner and member information in owner.json
-    debugError()
+    ownerData[serverId] = {
+        ownerId: guild.ownerId,  // Use the guild object to get the owner ID
+        memberCount: guild.memberCount  // Use the guild object to get the member count
+    };    
+
+    fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
 
     console.log(`Joined new guild: ${guild.name}`);
 });
@@ -275,10 +282,13 @@ client.on('messageCreate', async message => {
         ensureServerData(serverId, message.guild);
 
         // Store owner and member information in owner.json
-        debugError();
+        ownerData[serverId] = {
+            ownerId: guild.ownerId,  // Use the guild object to get the owner ID
+            memberCount: guild.memberCount  // Use the guild object to get the member count
+        };        
+        fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
 
         // Save updated owner data to file
-        saveOwnerData(ownerData);
 
         // Ensure that the server data is initialized
         if (!data[serverId]) {
@@ -424,7 +434,7 @@ client.on('messageCreate', async message => {
         }
 
         if (ownerCommands[command]) {
-            await ownerCommands[command].execute(message, client, serverConfigsData, ownerData);
+            await ownerCommands[command].execute(message, client, serverConfigsData, ownerData, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
         }
 
     } catch (error) {
@@ -480,16 +490,6 @@ async function manageRoles(member, level, guild, message) {
             }
         } else {
             console.log(`No role configured for level ${level}`);
-        }
-
-        // * Automatically assign an achievement for reaching a specific level
-        if (achievementsData[serverId].template.levelAchievements.enabled === true) {
-            if (milestoneLevels.includes(level)) {
-                const achievementName = `Reached Level ${level}`;
-                if (addAchievement(serverId, member.user.id, achievementName)) {
-                    await message.channel.send(`🎉 <@${member.user.id}> has earned the achievement: **${achievementName}**!`);
-                }
-            }
         }
     } catch (error) {
         console.error(`Failed to manage roles for ${member.user.username}:`, error);

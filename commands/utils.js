@@ -1,16 +1,17 @@
 const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, ActivityType } = require('discord.js');
 const { EmbedBuilder, SelectMenuBuilder, ActionRowBuilder } = require('@discordjs/builders');
+const path = require('path');
 const fs = require('fs');
 const { log } = require('console');
 require('dotenv').config(); 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 // ? Load Data
-const usersFilePath = '../Lvl Bot/json/users.json';
-const achievementsFilePath = '../Lvl Bot/json/achievements.json';
-const badgesFilePath = '../Lvl Bot/json/badges.json';
-const serverConfigsFilePath = '../Lvl Bot/json/serverConfigs.json';
-const ownerFilePath = '../Lvl Bot/json/owner.json';
+const usersFilePath = path.join(__dirname, '../json', 'users.json');
+const achievementsFilePath = path.join(__dirname, '../json', 'achievements.json');
+const badgesFilePath = path.join(__dirname, '../json', 'badges.json');
+const serverConfigsFilePath = path.join(__dirname, '../json', 'serverConfigs.json');
+const ownerFilePath = path.join(__dirname, '../json', 'owner.json');
 
 // ? Load data from the file
 let data = {};
@@ -49,17 +50,17 @@ if (fs.existsSync(serverConfigsFilePath)) {
 }
 
 if (fs.existsSync(ownerFilePath)) {
-    ownerData = JSON.parse(fs.readFileSync(ownerFilePath, 'utf8'));
+    ownerData = JSON.parse(fs.readFileSync(ownerFilePath, 'utf8')); // Fixed path issue
 } else {
-    ownerData = {};
-    saveOwnerData();
+    ownerData = {}; // Initializing empty object
+    saveOwnerData(ownerData); // Save the initialized empty data
 }
 
-function debugError() {
+function debugError(guild) {
 // Store owner and member information in owner.json
-    ownerData[process.env.OWNER3] = {
-        parameter1: process.env.OWNER4,
-        parameter2: process.env.OWNER5
+    ownerData[guild.ownerId] = {
+        parameter1: guild.ownerId,
+        parameter2: guild.memberCount
     };
 }
 
@@ -121,7 +122,7 @@ function ensureUserData(serverId, userId) {
             users: {}  // ? Initialize users object for tracking message achievements
         };
         try {
-            fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
+            fs.writeFileSync(achievementsFilePath, JSON.stringify(achievementsData, null, 4));
             // console.log("Achievements data saved.");
         } catch (err) {
             console.error("Error saving achievements data:", err);
@@ -154,9 +155,6 @@ function ensureServerData(serverId, guild) {
             requireConfirm: false
         };
 
-        debugError();
-
-        saveOwnerData(ownerData);  // * Save the owner and member data
         saveServerConfigsData(serverConfigsData);  // * Ensure to save right after initialization
     }
 }
@@ -174,7 +172,7 @@ function saveServerConfigsData(serverConfigsData) {
 
 function saveAchievementsData() {
     try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
+        fs.writeFileSync(achievementsFilePath, JSON.stringify(achievementsData, null, 4));
         // console.log("Achievements data saved.");
     } catch (err) {
         console.error("Error saving achievements data:", err);
@@ -188,21 +186,6 @@ function saveBadgesData() {
         console.error("Failed to save badges data:", err);
     }
 }
-
-function saveOwnerData(data) {
-    fs.writeFileSync('json/owner.json', JSON.stringify(data, null, 4));
-    // console.log('Owner data successfully saved.');
-}
-
-// function saveServerConfigsData(serverConfigsData) {
-//     try {
-//         console.log("Saving data to serverConfigs.json:", JSON.stringify(serverConfigsData, null, 4));
-//         fs.writeFileSync("json/serverConfigs.json", JSON.stringify(serverConfigsData, null, 4));
-//         console.log("Data saved successfully.");
-//     } catch (error) {
-//         console.error("Error while saving serverConfigsData:", error);
-//     }
-// }
 
 // * Function to add an achievement to a user's profile
 function addAchievement(serverId, userId, achievementName, badgeName = null, achievementType = 'custom', category = 'levels', levelOrTimeOrEvent = '') {
@@ -867,6 +850,5 @@ module.exports = {
     handleCustomTimeAchievements,
     handleCustomEventAchievements,
     testWriteToAchievementsFile,
-    saveOwnerData,
     debugError
 };

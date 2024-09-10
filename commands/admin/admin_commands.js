@@ -91,7 +91,7 @@ module.exports = {
             data[message.guild.id].milestoneLevels = levels;
     
             // Save data immediately
-            await fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
+            await fs.writeFileSync('../../json/users.json', JSON.stringify(data, null, 4));
     
             // Step 5: Send confirmation message
             const confirmationEmbed = new EmbedBuilder()
@@ -162,7 +162,7 @@ module.exports = {
                 updatedLevels.push(level);
             }
 
-            await fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
+            await fs.writeFileSync('../../json/users.json', JSON.stringify(data, null, 4));
 
             const updatedLevelsString = updatedLevels.map(level => `${level}: <@&${data[message.guild.id].roles[level]}>`).join('\n');
             const confirmationEmbed = new EmbedBuilder()
@@ -194,6 +194,7 @@ module.exports = {
                 return `${badge.emoji} ${badge.name}`; 
             }).join(', ') || "No badges set"
             : "No badges set";
+            const setPrefix = serverConfigsData[serverId].prefix || "!";
         
             const embed = new EmbedBuilder()
                 .setColor(0x3498db)
@@ -204,7 +205,8 @@ module.exports = {
                     { name: "Log Channel", value: setlogchannel, inline: true },
                     { name: "Set Levels", value: setLevels, inline: true },
                     { name: "Set Roles", value: setRoles, inline: true },
-                    { name: "Badges", value: setBadges, inline: true }
+                    { name: "Badges", value: setBadges, inline: true },
+                    { name: "Prefix", value: `\`${setPrefix}\``, inline: true }
                 )
                 .setFooter({ text: "Use the appropriate commands to manage these settings.", iconURL: message.client.user.displayAvatarURL() });
 

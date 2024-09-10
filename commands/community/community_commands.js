@@ -1,5 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
-const { ensureUserData, ensureServerData, saveData } = require('../utils');
+const { ensureUserData, ensureServerData } = require('../utils');
 const fs = require('fs');
 const DBL = require('dblapi.js');
 const axios = require('axios');
@@ -137,7 +137,7 @@ module.exports = {
                 }
             } catch (error) {
                 console.error('Error in checkroles command:', error);
-                message.channel.send("There was an error retrieving your roles.");
+                allowedChannel.send("There was an error retrieving your roles.");
             }
         },
     },
@@ -147,43 +147,60 @@ module.exports = {
         execute: async (message, args, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
             try {
                 const serverId = message.guild.id;
-                const userId = message.mentions.users.first()?.id || message.author.id;
-
+                // Check if a user was mentioned, if not, fallback to the message author
+                const user = message.mentions.users.first() || message.author;
+                const userId = user.id;
+    
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
-
+    
                 if (!allowedChannelId || allowedChannelId === message.channel.id) {
                     let allowedChannel = message.channel;
-
+    
                     if (allowedChannelId) {
                         allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
-                        
+    
                         if (!allowedChannel) {
                             return message.channel.send("The allowed channel could not be found or fetched.");
                         }
-                    }    
+                    }
+    
                     // Ensure the user data is initialized before accessing it
-                    ensureUserData(serverId, userId, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
-        
-                    const user = data[serverId].users[userId];
-                    const member = message.guild.members.cache.get(userId);
-        
+                    if (!data[serverId]) {
+                        data[serverId] = { users: {} };
+                    }
+    
+                    if (!data[serverId].users[userId]) {
+                        // Initialize user data if the user doesn't exist in users.json
+                        data[serverId].users[userId] = {
+                            xp: 0,
+                            level: 1,
+                            bio: "",
+                            roles: [],
+                            totalXp: 0,
+                        };
+                        saveData();
+                    }
+    
+                    const userData = data[serverId].users[userId];
+                    const member = message.guild.members.cache.get(userId) || await message.guild.members.fetch(userId);
+    
                     // Check if achievements exist, if not, default to an empty array
                     const userAchievements = achievementsData[serverId]?.users[userId]?.achievements || [];
-        
+    
                     // Join achievements into a string or show "No achievements yet" if none exist
                     const achievements = userAchievements.length > 0
                         ? userAchievements.join(', ') 
                         : "No achievements yet";
-        
-                    const bio = user.bio || "This user hasn't set a bio yet";
-        
+    
+                    const bio = userData.bio || "This user hasn't set a bio yet";
+    
                     const userBadges = badgesData[serverId][userId] || [];
-        
+    
                     const roles = member.roles.cache
                         .filter(role => role.name !== '@everyone')
                         .map(role => `<@&${role.id}>`)
                         .join(", ") || "No roles";
-        
+    
                     const badgeDisplay = userBadges.map(badgeName => {
                         // Find the badge in the server badges
                         const badgeEntry = Object.values(badgesData[serverId].badges).find(b => b.name === badgeName);
@@ -191,29 +208,29 @@ module.exports = {
                         // If the badge is found, display its emoji and name, otherwise show "Unknown Badge"
                         return badgeEntry ? `${badgeEntry.emoji} ${badgeEntry.name}` : "Unknown Badge";
                     }).join(', ') || "No badges";
-        
+    
                     const embed = new EmbedBuilder()
                         .setColor(0x3498db)
                         .setTitle(`${member.displayName}'s Profile`)
                         .setDescription(bio)
                         .addFields(
-                            { name: 'Level', value: `${user.level}`, inline: true },
-                            { name: 'XP', value: `${user.xp}`, inline: true },
+                            { name: 'Level', value: `${userData.level}`, inline: true },
+                            { name: 'XP', value: `${userData.xp}`, inline: true },
                             { name: 'Roles', value: roles, inline: true },
                             { name: 'Achievements', value: achievements, inline: true },
                             { name: 'Badges', value: badgeDisplay, inline: true }
                         )
-                        .setThumbnail(member.user.displayAvatarURL())
-                        .setFooter({ text: `*Tip: Use the !setbio command to update bio*` });
-        
-                    await message.channel.send({ embeds: [embed] });
+                        .setThumbnail(user.displayAvatarURL())
+                        .setFooter({ text: `*Tip: Use the !setbio command to update your bio*` });
+    
+                    await allowedChannel.send({ embeds: [embed] });
                 }
             } catch (error) {
                 console.error('Error in profile command: ', error);
                 message.channel.send("There was an error generating this user's profile.");
             }
         },
-    },
+    },    
     
     // * FIXED
     setbio: {
@@ -240,7 +257,7 @@ module.exports = {
                     .setDescription("Please provide the bio you want to set. Type your bio below:")
                     .setFooter({ text: "Set your bio", iconURL: message.author.displayAvatarURL() });
 
-                await message.channel.send({ embeds: [embed] });
+                await allowedChannel.send({ embeds: [embed] });
 
                 const filter = response => response.author.id === message.author.id;
                 const collected = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
@@ -257,7 +274,7 @@ module.exports = {
 
                 // Step 2: Save the bio
                 data[serverId].users[userId].bio = bio;
-                await fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
+                fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
 
                 // Step 3: Confirmation message
                 const confirmEmbed = new EmbedBuilder()
@@ -267,18 +284,19 @@ module.exports = {
                     .addFields({ name: "Your new bio", value: bio })
                     .setFooter({ text: `Updated by ${message.author.username}`, iconURL: message.client.user.displayAvatarURL() });
 
-                return message.channel.send({ embeds: [confirmEmbed] });
+                return allowedChannel.send({ embeds: [confirmEmbed] });
             }
         },
     },
 
     // * FIXED
     leaderboard: {
-        execute: async (message, args, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData, saveData) => {
             try {
                 const serverId = message.guild.id;
                 const serverData = data[serverId];
 
+                // Retrieve the allowed channel
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
 
                 if (!allowedChannelId || allowedChannelId === message.channel.id) {
@@ -286,40 +304,54 @@ module.exports = {
 
                     if (allowedChannelId) {
                         allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
-                        
+
                         if (!allowedChannel) {
                             return message.channel.send("The allowed channel could not be found or fetched.");
                         }
                     }
+
                     if (!serverData || !serverData.users) {
                         return message.channel.send("No data found for this server.");
                     }
 
-                    const leaderboard = Object.entries(serverData.users)
-                        .map(([id, userData]) => {
-                            const member = message.guild.members.cache.get(id);
-                            return {
-                                displayName: member ? member.displayName : "Unknown User",
-                                level: userData.level,
-                                xp: userData.xp
-                            };
-                        })
-                        .filter(user => user.displayName !== "Unknown User")
-                        .sort((a, b) => {
-                            if (b.level === a.level) {
-                                return b.xp - a.xp;
+                    // Fetch members from the cache or API if needed
+                    const leaderboard = await Promise.all(Object.entries(serverData.users).map(async ([id, userData]) => {
+                        let member = message.guild.members.cache.get(id);
+                        if (!member) {
+                            try {
+                                member = await message.guild.members.fetch(id); // Fetch member if not cached
+                            } catch (error) {
+                                console.error(`Failed to fetch member with ID: ${id}`);
+                                return null; // Skip users who can't be fetched
                             }
-                            return b.level - a.level;
-                        })
-                        .slice(0, 10);
+                        }
 
-                    if (leaderboard.length === 0) {
-                        return message.channel.send("No one has earned any XP yet!");
+                        return {
+                            displayName: member ? member.displayName : "Unknown User",
+                            level: userData.level,
+                            xp: userData.xp
+                        };
+                    }));
+
+                    const validLeaderboard = leaderboard.filter(user => user !== null); // Remove null entries
+
+                    // Sort by level and xp
+                    const sortedLeaderboard = validLeaderboard.sort((a, b) => {
+                        if (b.level === a.level) {
+                            return b.xp - a.xp;
+                        }
+                        return b.level - a.level;
+                    }).slice(0, 10); // Limit to top 10
+
+                    if (sortedLeaderboard.length === 0) {
+                        return allowedChannel.send("No one has earned any XP yet!");
                     }
 
-                    const usersField = leaderboard.map((user, index) => `${index + 1}. ${user.displayName}`).join(`\n`);
-                    const levelsField = leaderboard.map(user => `${user.level}`).join(`\n`);
+                    // Prepare fields for leaderboard
+                    const usersField = sortedLeaderboard.map((user, index) => `${index + 1}. ${user.displayName}`).join('\n');
+                    const levelsField = sortedLeaderboard.map(user => `${user.level}`).join('\n');
 
+                    // Create leaderboard embed
                     const leaderboardEmbed = new EmbedBuilder()
                         .setColor(0x3498db)
                         .setTitle("Server Leaderboard")
@@ -329,7 +361,7 @@ module.exports = {
                         )
                         .setTimestamp();
 
-                    await message.channel.send({ embeds: [leaderboardEmbed] });
+                    await allowedChannel.send({ embeds: [leaderboardEmbed] });
                 }
             } catch (error) {
                 console.error('Error in leaderboard command:', error);
@@ -397,9 +429,11 @@ module.exports = {
 
     // * Check if it works via the bot 
     vote: {
-        execute: async (message, args, client, data, saveData) => {
+        execute: async (message, args, client) => {
             const userId = message.author.id;
             const serverId = message.guild.id;
+            const data = JSON.parse(fs.readFileSync('./json/users.json', 'utf8'));
+            const saveData = fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
     
             const allowedChannelId = serverConfigsData[serverId].allowedChannel;
     
@@ -440,7 +474,7 @@ module.exports = {
                             iconURL: message.client.user.displayAvatarURL()
                         });
                 
-                    await message.channel.send({ embeds: [voteEmbed] });
+                    await allowedChannel.send({ embeds: [voteEmbed] });
                 
                     if (voted) {
                         return message.channel.send("It looks like you have already voted. You can vote again in 12 hours.");
@@ -449,13 +483,64 @@ module.exports = {
                         const xpReward = 100;
                         ensureUserData(serverId, userId, data, saveData);
                         data[serverId].users[userId].xp += xpReward;
-                        saveData();
+                        saveData;
                 
-                        return message.channel.send(`Thank you for voting! You have earned ${xpReward} XP.`);
+                        return allowedChannel.send(`Thank you for voting! You have earned ${xpReward} XP.`);
                     }
                 } catch (error) {
-                    console.error("Error checking top.gg vote status:", error);
-                    return message.channel.send("There was an error checking your vote status. Please try again later.");
+
+                    // cool down of 12 hours
+                    const coolDown = 12 * 60 * 60 * 1000;
+                    const now = Date.now();
+                    const lastVote = data[serverId].users[userId].lastVote || 0;
+
+
+                    if (now - lastVote > coolDown) {
+                        const xpReward = 100;
+                            ensureUserData(serverId, userId, data, saveData);
+                            data[serverId].users[userId].xp += xpReward;
+                            data[serverId].users[userId].lastVote = now;
+                            saveData;
+    
+                        const voteEmbed = new EmbedBuilder()
+                            .setColor(0x3498db)
+                            .setTitle("Vote for Level Bot to Earn Rewards")
+                            .setDescription("Vote for the bot to help it grow! XP Bonus coming soon")
+                            .addFields(
+                                {
+                                    name: 'Vote on top.gg to earn 100 XP',
+                                    value: `🟢 You can vote now. [Vote here!](https://top.gg/bot/${hardcodedBotId}/vote)`,
+                                    inline: false
+                                }
+                            )
+                            .setFooter({
+                                text: "Thank you for your support!",
+                                iconURL: message.client.user.displayAvatarURL()
+                            });
+                    
+                        await allowedChannel.send({ embeds: [voteEmbed] });
+                    }
+                    else {
+                        message.channel.send("It looks like you have already voted. You can vote again in 12 hours.");
+                        const voteEmbed = new EmbedBuilder()
+                            .setColor(0x3498db)
+                            .setTitle("Vote for Level Bot to Earn Rewards")
+                            .setDescription("It looks like you have already voted. You can vote again in 12 hours")
+                            .addFields(
+                                {
+                                    name: 'Vote on top.gg to earn 100 XP',
+                                    value: `🔴 You have already voted. You can vote again in 12 hours`,
+                                    inline: false
+                                }
+                            )
+                            .setFooter({
+                                text: "Thank you for your support!",
+                                iconURL: message.client.user.displayAvatarURL()
+                            });
+                    
+                        await allowedChannel.send({ embeds: [voteEmbed] });
+                    }
+
                 }
             }
         },
