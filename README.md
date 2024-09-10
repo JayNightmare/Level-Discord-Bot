@@ -14,13 +14,16 @@
     </a>
     <br />
     <br />
-    <div align="center">
+    <div >
         <p>Top.gg Stats</p>
         <a href="https://top.gg/bot/1278098225353719869">
           <img src="https://top.gg/api/widget/upvotes/1278098225353719869.svg">
         </a>
+        <p>DiscordBotList</p>
+        <a href="https://discordbotlist.com/bots/level-bot">
+            <img src="https://discordbotlist.com/api/v1/bots/1278098225353719869/widget">
+        </a>
     </div>
-    
 </p>
 <p align="center">This bot will keep track of user levels. Has anti spam measures and has commands for QOL</p>
 
