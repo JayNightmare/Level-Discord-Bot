@@ -14,7 +14,7 @@
     </a>
     <br />
     <br />
-    <div >
+    <div align="center">
         <p>Top.gg Stats</p>
         <a href="https://top.gg/bot/1278098225353719869">
           <img src="https://top.gg/api/widget/upvotes/1278098225353719869.svg">
