@@ -7,11 +7,19 @@ require('dotenv').config();
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 // ? Load Data
+<<<<<<< HEAD
 const usersFilePath = path.join(__dirname, '../json', 'users.json');
 const achievementsFilePath = path.join(__dirname, '../json', 'achievements.json');
 const badgesFilePath = path.join(__dirname, '../json', 'badges.json');
 const serverConfigsFilePath = path.join(__dirname, '../json', 'serverConfigs.json');
 const ownerFilePath = path.join(__dirname, '../json', 'owner.json');
+=======
+const usersFilePath = './json/users.json';
+const achievementsFilePath = './json/achievements.json';
+const badgesFilePath = './json/badges.json';
+const serverConfigsFilePath = './json/serverConfigs.json';
+const ownerFilePath = './json/owner.json';
+>>>>>>> 3277b77497bc5ec47166105f71f1a634ac638a00
 
 // ? Load data from the file
 let data = {};
@@ -122,7 +130,11 @@ function ensureUserData(serverId, userId) {
             users: {}  // ? Initialize users object for tracking message achievements
         };
         try {
+<<<<<<< HEAD
             fs.writeFileSync(achievementsFilePath, JSON.stringify(achievementsData, null, 4));
+=======
+            fs.writeFileSync(achievementFilePath, JSON.stringify(achievementsData, null, 4));
+>>>>>>> 3277b77497bc5ec47166105f71f1a634ac638a00
             // console.log("Achievements data saved.");
         } catch (err) {
             console.error("Error saving achievements data:", err);
@@ -187,6 +199,24 @@ function saveBadgesData() {
     }
 }
 
+<<<<<<< HEAD
+=======
+function saveOwnerData(data) {
+    fs.writeFileSync(ownerFilePath, JSON.stringify(data, null, 4));
+    // console.log('Owner data successfully saved.');
+}
+
+// function saveServerConfigsData(serverConfigsData) {
+//     try {
+//         console.log("Saving data to serverConfigs.json:", JSON.stringify(serverConfigsData, null, 4));
+//         fs.writeFileSync("json/serverConfigs.json", JSON.stringify(serverConfigsData, null, 4));
+//         console.log("Data saved successfully.");
+//     } catch (error) {
+//         console.error("Error while saving serverConfigsData:", error);
+//     }
+// }
+
+>>>>>>> 3277b77497bc5ec47166105f71f1a634ac638a00
 // * Function to add an achievement to a user's profile
 function addAchievement(serverId, userId, achievementName, badgeName = null, achievementType = 'custom', category = 'levels', levelOrTimeOrEvent = '') {
     ensureUserData(serverId, userId);
@@ -252,7 +282,7 @@ function addAchievement(serverId, userId, achievementName, badgeName = null, ach
 
     // Save the updated achievements data
     try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
+        fs.writeFileSync(achievementsFilePath, JSON.stringify(achievementsData, null, 4));
         console.log("Achievements data successfully initialized and saved.");
     } catch (err) {
         console.error("Error initializing achievements data:", err);
@@ -334,7 +364,7 @@ async function notifyUpdate(client) {
                 const messageToServers = `
                 ***THE BOT WILL BE UPDATING SHORTLY***
 
-                No XP will be gained after this message until the "Pushing Update to Server" has disappeared from the bot status (roughly 20-30 mins). 
+                All xp will be reset to the 6th of Auguest as that's when I pulled the data. Good chance to use the new commands than 👀 
 
                 **New Update:**
                 - **This message!** - You will be notified when the bot updates in your log channel (if none is set, it will send to the next publicly available channel).\n
@@ -558,7 +588,7 @@ async function handleTemplateOptions(message, interaction, achievementsData, sav
 
     // Save updated achievements data
     try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
+        fs.writeFileSync(achievementFilePath, JSON.stringify(achievementsData, null, 4));
         // console.log("Achievements data successfully updated and saved.");
     } catch (err) {
         console.error("Error saving achievements data:", err);
@@ -638,7 +668,7 @@ async function trackMessageAchievements(message, achievementsData, saveAchieveme
 
     // Save achievements data
     try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
+        fs.writeFileSync(achievementFilePath, JSON.stringify(achievementsData, null, 4));
         // console.log("Achievements data saved.");
     } catch (err) {
         console.error("Error saving achievements data:", err);
