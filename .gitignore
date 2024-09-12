@@ -1,11 +1,6 @@
 /.env
 /node_modules
-/users.json
-json/achievements.json
-json/badges.json
-json/serverConfigs.json
-json/users.json
 commands/owner/owner_commands.js
 json/dishout.js
 json/dishout.json
-json/owner.json
+
