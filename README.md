@@ -55,6 +55,27 @@ Go back to the portal and go to `Bot -> Privileged Gateway Intents` and enable a
 - Scopes: `application.commands` and `bot`
 - Permissions: `Embed Links`, `Manage Messages`, `Manage Roles`, `Read Message History`, and `Send Messages` or `Administrator` for no conflict.
 
+### General Permissions:
+- **Administrator** (if you want the bot to have full control) or alternatively, you can selectively choose:
+  - **Manage Server** (if the bot needs to modify server settings)
+  - **Manage Roles** (for commands that set roles for users)
+  - **Manage Channels** (if the bot will create/manage channels)
+  - **View Audit Log** (if your bot will log server activities)
+
+### Text Permissions:
+- **Send Messages** (this is essential for sending commands/responses)
+- **Embed Links** (for sending rich embeds with detailed information)
+- **Manage Messages** (if you want the bot to delete or edit messages)
+- **Read Message History** (to respond to older messages)
+- **Use Slash Commands** (for enabling your bot to use slash commands)
+- **Mention Everyone** (if the bot needs to ping @everyone or specific roles)
+- **Add Reactions** (if your bot interacts via emoji reactions)
+
+### Voice Permissions:
+If your bot needs to interact with voice channels, you might consider:
+- **Connect** (if the bot will join voice channels)
+- **Speak** (if the bot will speak in voice channels)
+
 ---
 
 ### Step 6:
