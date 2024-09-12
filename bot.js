@@ -1,17 +1,17 @@
-const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, ActivityType } = require('discord.js');
-const { EmbedBuilder, SelectMenuBuilder, ActionRowBuilder } = require('@discordjs/builders');
+const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, ActivityType, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('@discordjs/builders');
 require('dotenv').config();
 const fs = require('fs');
 const { log } = require('console');
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
+const rest = new REST({ version: '10' }).setToken(process.env.TEST_TOKEN);
 
 // ? Load Data
 const usersFilePath = 'json/users.json';
 const achievementsFilePath = 'json/achievements.json';
 const badgesFilePath = 'json/badges.json';
 const serverConfigsFilePath = 'json/serverConfigs.json';
-const ownerFilePath = '../Lvl Bot/json/owner.json';
+const ownerFilePath = 'json/owner.json';
 
 // ? Load data from the file
 let data = {};
@@ -104,7 +104,97 @@ client.on('shardResume', (shardId) => {
     sendStatusMessage(`Shard ${shardId} is back online.`);
 });
 
+
+const commands = [
+    new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('See all the commands available in the bot')
+];
+
+client.once('ready', async () => {
+    console.log(`Logged in as ${client.user.tag}!`);
+
+    try {
+        console.log('Started refreshing application (/) commands.');
+
+        // Fetch all guilds the bot is in
+        const guilds = await client.guilds.fetch();
+
+        guilds.forEach(async (guild) => {
+            try {
+                // Register slash commands for each guild dynamically
+                await rest.put(
+                    Routes.applicationGuildCommands(client.user.id, guild.id),
+                    { body: commands }
+                );
+                console.log(`Successfully registered commands for guild: ${guild.id}`);
+            } catch (error) {
+                console.error(`Error registering commands for guild: ${guild.id}`, error);
+            }
+        });
+
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error(error);
+    }
+});
+
 client.on('interactionCreate', async interaction => {
+    const { commandName } = interaction;
+
+    if (commandName === 'help') {
+        try {
+            const options = [
+                {
+                    label: 'Admin Commands',
+                    description: 'Commands for managing server settings',
+                    value: 'admin_commands',
+                },
+                {
+                    label: 'Community Commands',
+                    description: 'Commands for community interactions',
+                    value: 'community_commands',
+                },
+                {
+                    label: 'Configuration Commands',
+                    description: 'Commands for configuring the bot',
+                    value: 'configuration_commands',
+                },
+                {
+                    label: 'Help With Commands',
+                    description: 'Help with commands for the bot',
+                    value: 'command_help',
+                }
+            ];
+    
+            if (interaction.member.id === process.env.OWNER) {
+                options.push({
+                    label: 'Owner Commands',
+                    description: 'Commands only available to the bot owner',
+                    value: 'owner_commands',
+                });
+            }
+
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('help_menu')
+                        .setPlaceholder('Select a category')
+                        .addOptions(options),
+                );
+
+            const optionEmbed = new EmbedBuilder()
+                .setColor(0x3498db)
+                .setTitle("Help")
+                .setDescription("Choose an option below to see commands")
+    
+            await interaction.reply({ embeds: [optionEmbed], components: [row] });
+        } catch (error) {
+            console.error('An error occurred while creating the help embed:', error);
+            interaction.reply('An error occurred while generating the help message. Please contact the admin. **Error code: 0hb**');
+        }
+    }
+
     if (!interaction.isStringSelectMenu()) return;
 
     if (interaction.customId === 'help_menu') {
@@ -153,10 +243,9 @@ client.on('interactionCreate', async interaction => {
                     .setDescription(`
                     • \`${prefixFinder}setprefix\` - Set a custom prefix for the bot.\n
                     • \`${prefixFinder}addxp\` - Add XP to a user.\n
-                    • \`${prefixFinder}rmxp\` - Remove XP from a user - 🚧 COMING SOON 🚧.\n
+                    • \`${prefixFinder}rmxp\` - Remove XP from a user.\n
                     • \`${prefixFinder}addachievement\` - Add an achievement to a user.\n
                     • \`${prefixFinder}rmachievement\` - Remove an achievement from a user.\n
-                    • \`${prefixFinder}setachievement\` - Set achievements for server.\n
                     • \`${prefixFinder}addbadge\` - Add a badge to a user.\n
                     • \`${prefixFinder}rmbadge\` - Remove a badge from a user.\n
                     • \`${prefixFinder}setbadges\` - Set badges for milestone levels.\n
@@ -252,21 +341,81 @@ client.on('interactionCreate', async interaction => {
     
 });
 
-client.on('guildCreate', guild => {
+client.on('guildCreate', async (guild) => {
     const serverId = guild.id;
 
-    ensureServerData(guild.id, guild);
+    // Fetch all members of the guild
+    await guild.members.fetch(); // Ensure members are cached
+
+    guild.members.cache.forEach(member => {
+        const userId = member.id;
+
+        // Ensure the user data exists for this user
+        ensureUserData(serverId, userId);
+        ensureServerData(serverId, guild);
+
+        if (!data[serverId]) {
+            data[serverId] = {
+                users: {},  // Initialize users object for the server
+                roles: {},
+                milestoneLevels: []
+            };
+        }
+
+        // Ensure that the users data is initialized
+        if (!data[serverId].users[userId]) {
+            data[serverId].users[userId] = {
+                xp: 0,
+                level: 1,
+                bio: "",
+                roles: [],
+                totalXp: 0,
+                lastVote: 0
+            };
+        }
+
+        // Ensure achievements data exists for this user
+        if (!achievementsData[serverId]) {
+            achievementsData[serverId] = { users: {} };
+        }
+        if (!achievementsData[serverId].users[userId]) {
+            achievementsData[serverId].users[userId] = { achievements: [] };
+        }
+
+        // Ensure badges data exists for this user
+        if (!badgesData[serverId]) {
+            badgesData[serverId] = { badges: {}, users: {} };
+        }
+        if (!badgesData[serverId].users[userId]) {
+            badgesData[serverId].users[userId] = [];
+        }
+    });
 
     // Store owner and member information in owner.json
     ownerData[serverId] = {
         ownerId: guild.ownerId,  // Use the guild object to get the owner ID
         memberCount: guild.memberCount  // Use the guild object to get the member count
-    };    
+    };
 
-    fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
+    // Write the changes to the files
+    try {
+        fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
+        fs.writeFileSync('./json/achievements.json', JSON.stringify(achievementsData, null, 4));
+        fs.writeFileSync('./json/badges.json', JSON.stringify(badgesData, null, 4));
+        fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
+
+        console.log(`Successfully updated data for guild: ${guild.name}`);
+    } catch (error) {
+        console.error('Error writing to file:', error);
+    }
+    console.log('Owner Data:', ownerData);
+    console.log('Achievements Data:', achievementsData);
+    console.log('Badges Data:', badgesData);
+    console.log('User Data:', data);
 
     console.log(`Joined new guild: ${guild.name}`);
 });
+
 
 // ! Message handling
 client.on('messageCreate', async message => {
@@ -302,13 +451,18 @@ client.on('messageCreate', async message => {
         // Ensure that the users data is initialized
         if (!data[serverId].users[userId] ||
             !data[serverId].users[userId].bio ||
-            !data[serverId].users[userId].totalXp) {
+            !data[serverId].users[userId].totalXp ||
+            !data[serverId].users[userId].xp ||
+            !data[serverId].users[userId].level ||
+            !data[serverId].users[userId].role ||
+            !data[serverId].users[userId].lastVote) {
             data[serverId].users[userId] = {
                 xp: data[serverId].users[userId].xp || 0,
                 level: data[serverId].users[userId].level || 1,
-                bio: "",
+                bio: data[serverId].users[userId].bio || "",
                 roles: data[serverId].users[userId].role || [],
-                totalXp: data[serverId].users[userId].xp || 0
+                totalXp: data[serverId].users[userId].totalXp || 0,
+                lastVote: data[serverId].users[userId].lastVote || 0
             };
         }
 
@@ -338,7 +492,7 @@ client.on('messageCreate', async message => {
         if (!message.content.startsWith(prefix)) {
             trackMessageAchievements(message, achievementsData, saveAchievementsData);
             const now = Date.now();
-            const cooldownAmount = 1;  // 60 seconds * 1000
+            const cooldownAmount = 60 * 1000;  // 60 seconds * 1000
 
             if (cooldowns.has(userId)) {
                 const expirationTime = cooldowns.get(userId) + cooldownAmount;
@@ -434,7 +588,7 @@ client.on('messageCreate', async message => {
         }
 
         if (ownerCommands[command]) {
-            await ownerCommands[command].execute(message, client, serverConfigsData, ownerData, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
+            await ownerCommands[command].execute(message, client, serverConfigsData, ownerData);
         }
 
     } catch (error) {

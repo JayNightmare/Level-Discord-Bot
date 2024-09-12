@@ -8,6 +8,8 @@ require('dotenv').config();
 const serverConfigsData = JSON.parse(fs.readFileSync('./json/serverConfigs.json', 'utf8'));
 const hardcodedBotId = process.env.HARDCODED;
 
+let data = {};
+
 function getRank(userId, serverId, data) {
     const serverData = data[serverId];
     if (!serverData || !serverData.users) {

@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@discordjs/builders": "^1.9.0",
     "axios": "^1.7.7",
     "dblapi.js": "^2.4.1",
     "discord.js": "^14.15.3"
