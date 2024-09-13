@@ -185,6 +185,157 @@ async function executeLeaderboard(guild, channel, data) {
     await channel.send({ embeds: [leaderboardEmbed] });
 }
 
+async function executeVote(userId, guild, channel, client, data, saveData, hardcodedBotId) {
+    const serverId = guild.id;
+
+    // Ensure user data is initialized
+    if (!data[serverId]) {
+        data[serverId] = { users: {} };
+    }
+
+    if (!data[serverId].users[userId]) {
+        data[serverId].users[userId] = { xp: 0, level: 1, bio: "", roles: [], totalXp: 0, lastVote: 0 };
+    }
+
+    try {
+        const response = await axios.get(`https://top.gg/api/bots/${hardcodedBotId}/check?userId=${userId}`, {
+            headers: { Authorization: process.env.TOPGG_API_KEY }
+        });
+
+        const voted = response.data.voted;  // Boolean: true if voted in last 12 hours, false if not
+
+        const voteEmbed = new EmbedBuilder()
+            .setColor(0x3498db)
+            .setTitle("Vote for Level Bot to Earn Rewards")
+            .setDescription("Vote for the bot to help it grow and earn extra XP as a reward!")
+            .addFields({
+                name: 'Vote on top.gg to earn 100 XP',
+                value: voted
+                    ? '🔴 You have already voted. You can vote again in 12 hours.'
+                    : `🟢 You can vote now. [Vote here!](https://top.gg/bot/${hardcodedBotId}/vote)`,
+                inline: false
+            })
+            .setFooter({
+                text: "Thank you for your support!",
+                iconURL: client.user.displayAvatarURL()
+            });
+
+        await channel.send({ embeds: [voteEmbed] });
+
+        if (voted) {
+            return channel.send("It looks like you have already voted. You can vote again in 12 hours.");
+        } else {
+            const xpReward = 100;
+            data[serverId].users[userId].xp += xpReward;
+            saveData();
+            return channel.send(`Thank you for voting! You have earned ${xpReward} XP.`);
+        }
+    } catch (error) {
+        // Handle cooldown if there's an error (e.g., network issues, API down, etc.)
+        const coolDown = 12 * 60 * 60 * 1000; // 12 hours in milliseconds
+        const now = Date.now();
+        const lastVote = data[serverId].users[userId].lastVote || 0;
+
+        if (now - lastVote > coolDown) {
+            const xpReward = 100;
+            data[serverId].users[userId].xp += xpReward;
+            data[serverId].users[userId].lastVote = now;
+            saveData();
+
+            const voteEmbed = new EmbedBuilder()
+                .setColor(0x3498db)
+                .setTitle("Vote for Level Bot to Earn Rewards")
+                .setDescription("Vote for the bot to help it grow! XP Bonus coming soon")
+                .addFields({
+                    name: 'Vote on top.gg to earn 100 XP',
+                    value: `🟢 You can vote now. [Vote here!](https://top.gg/bot/${hardcodedBotId}/vote)`,
+                    inline: false
+                })
+                .setFooter({
+                    text: "Thank you for your support!",
+                    iconURL: client.user.displayAvatarURL()
+                });
+
+            await channel.send({ embeds: [voteEmbed] });
+        } else {
+            channel.send("It looks like you have already voted. You can vote again in 12 hours.");
+            const voteEmbed = new EmbedBuilder()
+                .setColor(0x3498db)
+                .setTitle("Vote for Level Bot to Earn Rewards")
+                .setDescription("It looks like you have already voted. You can vote again in 12 hours")
+                .addFields({
+                    name: 'Vote on top.gg to earn 100 XP',
+                    value: `🔴 You have already voted. You can vote again in 12 hours`,
+                    inline: false
+                })
+                .setFooter({
+                    text: "Thank you for your support!",
+                    iconURL: client.user.displayAvatarURL()
+                });
+
+            await channel.send({ embeds: [voteEmbed] });
+        }
+    }
+}
+
+async function executeCheckRoles(user, guild, channel) {
+    const member = guild.members.cache.get(user.id);
+    const roles = member.roles.cache
+        .filter(role => role.name !== '@everyone')
+        .map(role => role.id)
+        .join(", ");
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setTitle(`${user.username}'s Roles`)
+        .setDescription(`<@&${roles}>` || "You don't have any special roles.")
+        .setThumbnail(user.displayAvatarURL())
+        .setFooter({ text: "Role Checker", iconURL: guild.client.user.displayAvatarURL() });
+
+    await channel.send({ embeds: [embed] });
+}
+
+async function executeRank(user, guild, channel, data, saveData) {
+    const serverId = guild.id;
+    const userId = user.id;
+
+    // Ensure the user data is initialized before accessing it
+    if (!data[serverId]) {
+        data[serverId] = { users: {} };
+    }
+
+    if (!data[serverId].users[userId]) {
+        return channel.send("You haven't earned any XP yet!");
+    }
+
+    const userData = data[serverId].users[userId];
+    const level = userData.level;
+    const xp = userData.xp;
+    const x = 100;  // Base multiplier
+    const y = 1.1;  // Scaling factor
+
+    const xpNeededForCurrentLevel = Math.floor(level * x * Math.pow(y, level));
+    const xpNeededForNextLevel = Math.floor((level + 1) * x * Math.pow(y, level + 1));
+
+    // XP required for the next level
+    const xpForNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
+
+    const rank = getRank(userId, serverId, data);
+
+    const embed = new EmbedBuilder()
+        .setColor(0x3498db)
+        .setTitle(`${user.username}'s Rank`)
+        .setDescription(`Level: ${level}`)
+        .addFields(
+            { name: 'XP', value: `${xp}/${xpForNextLevel} XP`, inline: true },
+            { name: 'Rank', value: `#${rank}`, inline: true }
+        )
+        .setThumbnail(user.displayAvatarURL())
+        .setFooter({ text: `Keep chatting to level up!`, iconURL: guild.client.user.displayAvatarURL() });
+
+    await channel.send({ embeds: [embed] });
+}
+
 module.exports = {
     // * FIXED
     rank: {
@@ -194,71 +345,53 @@ module.exports = {
                 const data = JSON.parse(fs.readFileSync('./json/users.json', 'utf8'));
 
                 const serverId = message.guild.id;
-                const userId = message.author.id;
-    
-                // Ensure the user data is initialized before accessing it
-                ensureUserData(serverId, userId, data, saveData);
-    
-                const user = data[serverId].users[userId];
-    
-                if (!user) {
-                    return message.channel.send("You haven't earned any XP yet!");
-                }
-    
-                const level = user.level;
-                const xp = user.xp;
-                const x = 100;  // Base multiplier
-                const y = 1.1;  // Scaling factor
+                const allowedChannelId = serverConfigsData[serverId]?.allowedChannel;
 
-                const xpNeededForCurrentLevel = Math.floor(level * x * Math.pow(y, level));
-                const xpNeededForNextLevel = Math.floor((level + 1) * x * Math.pow(y, level + 1));
-
-                // XP required for the next level
-                const xpForNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
-    
-                // Check if an allowed channel is set in the server configuration
-                const allowedChannelId = serverConfigsData[serverId].allowedChannel;
-    
-                if (!allowedChannelId || allowedChannelId === message.channel.id) {
-                    let allowedChannel = message.channel;
-
-                    if (allowedChannelId) {
-                        allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
-                        
-                        if (!allowedChannel) {
-                            return message.channel.send("The allowed channel could not be found or fetched.");
-                        }
-                    }
-    
-                    // If the channel is not cached, fetch it from the API
+                let allowedChannel = message.channel;
+                if (allowedChannelId && allowedChannelId !== message.channel.id) {
+                    allowedChannel = message.guild.channels.cache.get(allowedChannelId) || await message.guild.channels.fetch(allowedChannelId).catch(() => null);
                     if (!allowedChannel) {
-                        try {
-                            allowedChannel = await message.client.channels.fetch(allowedChannelId);
-                        } catch (error) {
-                            return message.channel.send("The allowed channel could not be found or fetched.");
-                        }
+                        return message.channel.send("The allowed channel could not be found or fetched.");
                     }
-    
-                    const embed = new EmbedBuilder()
-                        .setColor(0x3498db)
-                        .setTitle(`${message.author.displayName}'s Rank`)
-                        .setDescription(`Level: ${level}`)
-                        .addFields(
-                            { name: 'XP', value: `${xp}/${xpForNextLevel} XP`, inline: true },
-                            { name: 'Rank', value: `#${getRank(userId, serverId, data)}`, inline: true }
-                        )
-                        .setThumbnail(message.author.displayAvatarURL())
-                        .setFooter({ text: `Keep chatting to level up!`, iconURL: message.client.user.displayAvatarURL() });
-    
-                    // Send the embed to the allowed channel
-                    await allowedChannel.send({ embeds: [embed] });
                 }
-    
+
+                // Call shared rank logic
+                await executeRank(message.author, message.guild, allowedChannel, data, saveData);
             } catch (error) {
-                console.error('Error in rank command:', error);
+                console.error('Error in rank command (prefix):', error);
                 message.channel.send("There was an error retrieving your rank.");
             }
-        },
+        }
+    },
+
+    // ? Slash
+    slashRank: {
+        execute: async (interaction, client, saveData) => {
+            try {
+                const serverConfigsData = JSON.parse(fs.readFileSync('./json/serverConfigs.json', 'utf8'));
+                const data = JSON.parse(fs.readFileSync('./json/users.json', 'utf8'));
+
+                const serverId = interaction.guild.id;
+                const allowedChannelId = serverConfigsData[serverId]?.allowedChannel;
+
+                let allowedChannel = interaction.channel;
+                if (allowedChannelId && allowedChannelId !== interaction.channel.id) {
+                    allowedChannel = interaction.guild.channels.cache.get(allowedChannelId) || await interaction.guild.channels.fetch(allowedChannelId).catch(() => null);
+                    if (!allowedChannel) {
+                        return interaction.reply("The allowed channel could not be found or fetched.");
+                    }
+                }
+
+                // Call shared rank logic
+                await executeRank(interaction.user, interaction.guild, allowedChannel, data, saveData);
+
+                // Acknowledge the interaction
+                await interaction.reply({ content: "Rank retrieved!", ephemeral: true });
+            } catch (error) {
+                console.error('Error in rank command (slash):', error);
+                interaction.reply("There was an error retrieving your rank.");
+            }
+        }
     },
 
 // //
@@ -267,41 +400,51 @@ module.exports = {
     checkroles: {
         execute: async (message) => {
             try {
-
                 const serverId = message.guild.id;
-
                 const allowedChannelId = serverConfigsData[serverId].allowedChannel;
 
-                if (!allowedChannelId || allowedChannelId === message.channel.id) {
-                    let allowedChannel = message.channel;
-
-                    if (allowedChannelId) {
-                        allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
-                        
-                        if (!allowedChannel) {
-                            return message.channel.send("The allowed channel could not be found or fetched.");
-                        }
+                let allowedChannel = message.channel;
+                if (allowedChannelId && allowedChannelId !== message.channel.id) {
+                    allowedChannel = message.guild.channels.cache.get(allowedChannelId) || await message.guild.channels.fetch(allowedChannelId).catch(() => null);
+                    if (!allowedChannel) {
+                        return message.channel.send("The allowed channel could not be found or fetched.");
                     }
-                    const member = message.guild.members.cache.get(message.author.id);
-                    const roles = member.roles.cache
-                        .filter(role => role.name !== '@everyone')
-                        .map(role => role.id)
-                        .join(", ");
-
-                    const embed = new EmbedBuilder()
-                        .setColor(0x3498db)
-                        .setTitle(`${message.author.username}'s Roles`)
-                        .setDescription(`<@&${roles}>` || "You don't have any special roles.")
-                        .setThumbnail(message.author.displayAvatarURL())
-                        .setFooter({ text: "Role Checker", iconURL: message.client.user.displayAvatarURL() });
-
-                    await message.channel.send({ embeds: [embed] });
                 }
+
+                // Call shared checkroles logic
+                await executeCheckRoles(message.author, message.guild, allowedChannel);
             } catch (error) {
-                console.error('Error in checkroles command:', error);
-                allowedChannel.send("There was an error retrieving your roles.");
+                console.error('Error in checkroles command (prefix):', error);
+                message.channel.send("There was an error retrieving your roles.");
             }
-        },
+        }
+    },
+
+    // ? Slash
+    slashCheckRoles: {
+        execute: async (interaction) => {
+            try {
+                const serverId = interaction.guild.id;
+                const allowedChannelId = serverConfigsData[serverId].allowedChannel;
+
+                let allowedChannel = interaction.channel;
+                if (allowedChannelId && allowedChannelId !== interaction.channel.id) {
+                    allowedChannel = interaction.guild.channels.cache.get(allowedChannelId) || await interaction.guild.channels.fetch(allowedChannelId).catch(() => null);
+                    if (!allowedChannel) {
+                        return interaction.reply("The allowed channel could not be found or fetched.");
+                    }
+                }
+
+                // Call shared checkroles logic
+                await executeCheckRoles(interaction.user, interaction.guild, allowedChannel);
+
+                // Acknowledge the interaction
+                await interaction.reply({ content: "Roles checked!", ephemeral: true });
+            } catch (error) {
+                console.error('Error in checkroles command (slash):', error);
+                interaction.reply("There was an error retrieving your roles.");
+            }
+        }
     },
 
 // //
@@ -541,118 +684,52 @@ module.exports = {
         execute: async (message, args, client) => {
             const userId = message.author.id;
             const serverId = message.guild.id;
+
+            // Load the data from the file
             const data = JSON.parse(fs.readFileSync('./json/users.json', 'utf8'));
-            const saveData = fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
-    
+            const saveData = () => fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
+
             const allowedChannelId = serverConfigsData[serverId].allowedChannel;
-    
-            if (!allowedChannelId || allowedChannelId === message.channel.id) {
-                let allowedChannel = message.channel;
 
-                if (allowedChannelId) {
-                    allowedChannel = message.client.channels.cache.get(allowedChannelId) || await message.client.channels.fetch(allowedChannelId).catch(() => null);
-                    
-                    if (!allowedChannel) {
-                        return message.channel.send("The allowed channel could not be found or fetched.");
-                    }
-                }
-                try {
-                    const response = await axios.get(`https://top.gg/api/bots/${hardcodedBotId}/check?userId=${userId}`, {
-                        headers: {
-                            Authorization: process.env.TOPGG_API_KEY
-                        }
-                    });
-                
-                    const voted = response.data.voted;  // Boolean: true if voted in last 12 hours, false if not
-                
-                    const voteEmbed = new EmbedBuilder()
-                        .setColor(0x3498db)
-                        .setTitle("Vote for Level Bot to Earn Rewards")
-                        .setDescription("Vote for the bot to help it grow and earn extra XP as a reward!")
-                        .addFields(
-                            {
-                                name: 'Vote on top.gg to earn 100 XP',
-                                value: voted
-                                    ? '🔴 You have already voted. You can vote again in 12 hours.'
-                                    : `🟢 You can vote now. [Vote here!](https://top.gg/bot/${hardcodedBotId}/vote)`,
-                                inline: false
-                            }
-                        )
-                        .setFooter({
-                            text: "Thank you for your support!",
-                            iconURL: message.client.user.displayAvatarURL()
-                        });
-                
-                    await allowedChannel.send({ embeds: [voteEmbed] });
-                
-                    if (voted) {
-                        return message.channel.send("It looks like you have already voted. You can vote again in 12 hours.");
-                    } else {
-                        // Reward XP
-                        const xpReward = 100;
-                        ensureUserData(serverId, userId, data, saveData);
-                        data[serverId].users[userId].xp += xpReward;
-                        saveData;
-                
-                        return allowedChannel.send(`Thank you for voting! You have earned ${xpReward} XP.`);
-                    }
-                } catch (error) {
-
-                    // cool down of 12 hours
-                    const coolDown = 12 * 60 * 60 * 1000;
-                    const now = Date.now();
-                    const lastVote = data[serverId].users[userId].lastVote || 0;
-
-
-                    if (now - lastVote > coolDown) {
-                        const xpReward = 100;
-                            ensureUserData(serverId, userId, data, saveData);
-                            data[serverId].users[userId].xp += xpReward;
-                            data[serverId].users[userId].lastVote = now;
-                            saveData;
-    
-                        const voteEmbed = new EmbedBuilder()
-                            .setColor(0x3498db)
-                            .setTitle("Vote for Level Bot to Earn Rewards")
-                            .setDescription("Vote for the bot to help it grow! XP Bonus coming soon")
-                            .addFields(
-                                {
-                                    name: 'Vote on top.gg to earn 100 XP',
-                                    value: `🟢 You can vote now. [Vote here!](https://top.gg/bot/${hardcodedBotId}/vote)`,
-                                    inline: false
-                                }
-                            )
-                            .setFooter({
-                                text: "Thank you for your support!",
-                                iconURL: message.client.user.displayAvatarURL()
-                            });
-                    
-                        await allowedChannel.send({ embeds: [voteEmbed] });
-                    }
-                    else {
-                        message.channel.send("It looks like you have already voted. You can vote again in 12 hours.");
-                        const voteEmbed = new EmbedBuilder()
-                            .setColor(0x3498db)
-                            .setTitle("Vote for Level Bot to Earn Rewards")
-                            .setDescription("It looks like you have already voted. You can vote again in 12 hours")
-                            .addFields(
-                                {
-                                    name: 'Vote on top.gg to earn 100 XP',
-                                    value: `🔴 You have already voted. You can vote again in 12 hours`,
-                                    inline: false
-                                }
-                            )
-                            .setFooter({
-                                text: "Thank you for your support!",
-                                iconURL: message.client.user.displayAvatarURL()
-                            });
-                    
-                        await allowedChannel.send({ embeds: [voteEmbed] });
-                    }
-
+            let allowedChannel = message.channel;
+            if (allowedChannelId && allowedChannelId !== message.channel.id) {
+                allowedChannel = message.guild.channels.cache.get(allowedChannelId) || await message.guild.channels.fetch(allowedChannelId).catch(() => null);
+                if (!allowedChannel) {
+                    return message.channel.send("The allowed channel could not be found or fetched.");
                 }
             }
-        },
+
+            // Call shared vote logic
+            await executeVote(userId, message.guild, allowedChannel, client, data, saveData, process.env.BOT_ID);
+        }
+    },
+
+    // ? Slash
+    slashVote: {
+        execute: async (interaction, client) => {
+            const userId = interaction.user.id;
+            const serverId = interaction.guild.id;
+
+            // Load the data from the file
+            const data = JSON.parse(fs.readFileSync('./json/users.json', 'utf8'));
+            const saveData = () => fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
+
+            const allowedChannelId = serverConfigsData[serverId].allowedChannel;
+
+            let allowedChannel = interaction.channel;
+            if (allowedChannelId && allowedChannelId !== interaction.channel.id) {
+                allowedChannel = interaction.guild.channels.cache.get(allowedChannelId) || await interaction.guild.channels.fetch(allowedChannelId).catch(() => null);
+                if (!allowedChannel) {
+                    return interaction.reply("The allowed channel could not be found or fetched.");
+                }
+            }
+
+            // Call shared vote logic
+            await executeVote(userId, interaction.guild, allowedChannel, client, data, saveData, process.env.BOT_ID);
+
+            // Acknowledge the interaction
+            await interaction.reply({ content: "Vote processed!", ephemeral: true });
+        }
     }
 
 // //

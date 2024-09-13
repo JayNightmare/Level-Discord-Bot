@@ -106,14 +106,21 @@ client.on('shardResume', (shardId) => {
 
 
 const commands = [
+    // * Announce - Server Maintanance
     new SlashCommandBuilder()
         .setName('announce')
         .setDescription('Send a maintenance message to all servers'),
 
+    // //
+
+    // * Help
     new SlashCommandBuilder()
         .setName('help')
         .setDescription('See all the commands available in the bot'),
 
+    // //
+
+    // * Profile
     new SlashCommandBuilder()
         .setName('profile')
         .setDescription('View your profile or another user\'s profile')
@@ -122,17 +129,44 @@ const commands = [
                 .setDescription('The user whose profile you want to view')
                 .setRequired(false)),
 
-    new SlashCommandBuilder()
-    .setName('setbio')
-    .setDescription('Set your bio')
-    .addStringOption(option => 
-        option.setName('bio')
-            .setDescription('The bio to set')
-            .setRequired(true)),
+    // //
 
+    // * Set Bio
     new SlashCommandBuilder()
-    .setName('leaderboard')
-    .setDescription('View the server leaderboard'),
+        .setName('setbio')
+        .setDescription('Set your bio')
+        .addStringOption(option => 
+            option.setName('bio')
+                .setDescription('The bio to set')
+                .setRequired(true)),
+
+    // //
+
+    // * Leaderboard
+    new SlashCommandBuilder()
+        .setName('leaderboard')
+        .setDescription('View the server leaderboard'),
+
+    // //
+
+    // * Vote
+    new SlashCommandBuilder()
+        .setName('vote')
+        .setDescription('Vote for the bot and earn rewards'),
+    
+    // //
+
+    // * Check Roles
+    new SlashCommandBuilder()
+        .setName('checkroles')
+        .setDescription('Check your current roles'),
+
+    // //
+
+    // * Rank
+    new SlashCommandBuilder()
+    .setName('rank')
+    .setDescription('View your current rank and XP'),
 ];
 
 client.once('ready', async () => {
@@ -166,6 +200,9 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     const { commandName } = interaction;
 
+    // //
+
+    // * Help
     if (commandName === 'help') {
         try {
             const options = [
@@ -219,19 +256,54 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // if (commandName === 'announce') { await notifyUpdate(client); }
+    // //
 
+    // * Announce
+    if (interaction.member.id === process.env.OWNER) { if (commandName === 'announce') { await notifyUpdate(client); } }
+
+    // //
+
+    // * Profile
     if (commandName === 'profile') {
         await communityCommands.slashProfile.execute(interaction, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
     }
 
+    // //
+
+    // * Set Bio
     if (commandName === 'setbio') {
         await communityCommands.slashSetBio.execute(interaction, data, achievementsData, badgesData, saveData);
     }
 
+    // //
+
+    // * Leaderboard
     if (commandName === 'leaderboard') {
         await communityCommands.slashLeaderboard.execute(interaction, data, serverConfigsData, saveData);
     }
+
+    // //
+
+    // * Vote
+    if (commandName === 'vote') {
+        await communityCommands.slashVote.execute(interaction, client);
+    }
+
+    // //
+
+    // * Check Roles
+    if (commandName === 'checkroles') {
+        await communityCommands.slashCheckRoles.execute(interaction);
+    }
+
+    // //
+
+    // * Rank
+    if (commandName === 'rank') {
+        await communityCommands.slashRank.execute(interaction, client, saveData);
+    }
+
+    // * 
 
     if (!interaction.isStringSelectMenu()) return;
 
