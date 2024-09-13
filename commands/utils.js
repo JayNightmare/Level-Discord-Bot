@@ -7,11 +7,11 @@ require('dotenv').config();
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 // ? Load Data
-const usersFilePath = path.join(__dirname, '../json', 'users.json');
-const achievementsFilePath = path.join(__dirname, '../json', 'achievements.json');
-const badgesFilePath = path.join(__dirname, '../json', 'badges.json');
-const serverConfigsFilePath = path.join(__dirname, '../json', 'serverConfigs.json');
-const ownerFilePath = path.join(__dirname, '../json', 'owner.json');
+const usersFilePath = 'json/users.json';
+const achievementsFilePath = 'json/achievements.json';
+const badgesFilePath = 'json/badges.json';
+const serverConfigsFilePath = 'json/serverConfigs.json';
+const ownerFilePath = 'json/owner.json';
 
 // ? Load data from the file
 let data = {};
@@ -89,6 +89,8 @@ function ensureUserData(serverId, userId) {
             level: 1,
             bio: "",
             roles: [],
+            totalXp: 0,
+            lastVote: 0
         };
         saveData();
     }
@@ -328,47 +330,14 @@ async function notifyUpdate(client) {
         for (const serverId in data) {
             if (!serverConfigsData[serverId]) continue;
 
-            const prefixFinder = serverConfigsData[serverId].prefix || "!";
+            // const prefixFinder = serverConfigsData[serverId].prefix || "!";
             if (data.hasOwnProperty(serverId)) {
                 const logChannelId = serverConfigsData[serverId]?.loggingChannelId;
-                const messageToServers = `
-                ***THE BOT WILL BE UPDATING SHORTLY***
-
-                No XP will be gained after this message until the "Pushing Update to Server" has disappeared from the bot status (roughly 20-30 mins). 
-
-                **New Update:**
-                - **This message!** - You will be notified when the bot updates in your log channel (if none is set, it will send to the next publicly available channel).\n
-                - **Server Leaderboard** - Run the \`${prefixFinder}leaderboard\` command to see the top chatters in your server!\n
-                - **Add and Remove XP** - Run the \`${prefixFinder}addxp\` or \`${prefixFinder}rmxp\` to add and remove XP from a user!\n
-                - **Set Prefix** - You can now set your own prefix for this bot by running the \`${prefixFinder}setprefix\` command.\n
-                - **Updated Help** - Use the new \`${prefixFinder}help\` command to see the updated list of commands.\n
-                - **Achievements and Badges** - Users earn badges or achievements for reaching milestones. Run \`${prefixFinder}addachievement\` or \`${prefixFinder}addbadge\` to manually award achievements or badges.\n
-                - **Profile Command** - Users can view their profile using the \`${prefixFinder}profile\` command to see their level, XP, badges, achievements, and roles.\n
-                - **Bio Command** - Users can set a bio for their profile using the \`${prefixFinder}setbio\` command.\n
-                - **Blacklist/Unblacklist Channels** - Manage channels where the bot should ignore commands with \`${prefixFinder}blacklist\` and \`${prefixFinder}unblacklist\`.\n
-                - **Logging Channel** - Set a channel to receive bot-related logs with \`${prefixFinder}setlogchannel\` and \`${prefixFinder}unsetlogchannel\`.\n
-                - **Rank Channel** - Restrict rank and role-related commands to a specific channel using \`${prefixFinder}setrankchannel\` and \`${prefixFinder}unsetrankchannel\`.\n
-                - **Milestone Levels and Roles** - Define levels as milestones and assign roles for them using \`${prefixFinder}setlevels\` and \`${prefixFinder}setroles\`.\n
-
-                **Future Updates:**
-                - **XP Boosts** - Allows admins to give XP boosts to specific users for a limited time, multiplying XP gained.\n
-                - **Role-Based XP Multipliers** - Certain roles give users an XP multiplier (e.g., VIP members earn 1.5x XP).\n
-                - **Daily/Weekly Rewards** - Users can claim daily or weekly XP rewards.\n
-                - **XP Transfer** - Allows users to transfer their XP to other users.\n
-                - **Leaderboard Tiers** - Different leaderboards for various user segments, like top users of the week or month.\n
-                - **Custom Level-Up Messages** - Allows admins to set custom messages sent when users reach specific levels.\n
-                - **Guild-Wide XP Events** - Admins can start server-wide events where everyone gains extra XP for a limited time.\n
-                - **Customizable XP Gain Rates** - Allows admins to set how much XP users gain per message, adjusting progression speed.\n
-                - **Custom Anti-Spam Measures** - Enable/Disable anti-spamming measures for farm XP.\n
-                - **Prestige System** - When users reach the maximum level, they can "prestige," resetting their level but gaining a special role or title.\n
-                - **Customizable Level Cap** - Allows admins to set a maximum level users can achieve.\n
-
-                If you have any suggestions for features or commands, make a review on https://top.gg/bot/1278098225353719869.
-                `;
+                const messageToServers = `The bot has been experiencing issues on the server, causing it to get stuck in a reset loop. The bot will be down till the issue is resolved.`;
     
                 const embed = new EmbedBuilder()
                 .setColor(0xffa500) // Yellowish color to indicate warning or notice
-                .setTitle("Bot Update Notification")
+                .setTitle("Bot Maintanance")
                 .setDescription(messageToServers)
                 .setTimestamp();
 

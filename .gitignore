@@ -4,3 +4,8 @@ commands/owner/owner_commands.js
 json/dishout.js
 json/dishout.json
 
+json/achievements.json
+json/badges.json
+json/owner.json
+json/serverConfigs.json
+json/users.json

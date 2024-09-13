@@ -22,7 +22,7 @@ let ownerData = {};
 
 // ? Load command modules
 const adminCommands = require('./commands/admin/admin_commands.js');
-const communityCommands = require('./commands/community/community_commands.js');
+const communityCommands = require('./commands/community/community_commands');
 const configurationCommands = require('./commands/configuration/configuration_commands.js');
 const ownerCommands = require('./commands/owner/owner_commands.js');
 
@@ -107,8 +107,32 @@ client.on('shardResume', (shardId) => {
 
 const commands = [
     new SlashCommandBuilder()
+        .setName('announce')
+        .setDescription('Send a maintenance message to all servers'),
+
+    new SlashCommandBuilder()
         .setName('help')
-        .setDescription('See all the commands available in the bot')
+        .setDescription('See all the commands available in the bot'),
+
+    new SlashCommandBuilder()
+        .setName('profile')
+        .setDescription('View your profile or another user\'s profile')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('The user whose profile you want to view')
+                .setRequired(false)),
+
+    new SlashCommandBuilder()
+    .setName('setbio')
+    .setDescription('Set your bio')
+    .addStringOption(option => 
+        option.setName('bio')
+            .setDescription('The bio to set')
+            .setRequired(true)),
+
+    new SlashCommandBuilder()
+    .setName('leaderboard')
+    .setDescription('View the server leaderboard'),
 ];
 
 client.once('ready', async () => {
@@ -195,6 +219,20 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
+    // if (commandName === 'announce') { await notifyUpdate(client); }
+
+    if (commandName === 'profile') {
+        await communityCommands.slashProfile.execute(interaction, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
+    }
+
+    if (commandName === 'setbio') {
+        await communityCommands.slashSetBio.execute(interaction, data, achievementsData, badgesData, saveData);
+    }
+
+    if (commandName === 'leaderboard') {
+        await communityCommands.slashLeaderboard.execute(interaction, data, serverConfigsData, saveData);
+    }
+
     if (!interaction.isStringSelectMenu()) return;
 
     if (interaction.customId === 'help_menu') {
@@ -263,6 +301,7 @@ client.on('interactionCreate', async interaction => {
                     .setDescription(`
                     • \`${prefixFinder}${process.env.OWNER1}\`\n
                     • \`${prefixFinder}${process.env.OWNER2}\`\n
+                    • \`${prefixFinder}${process.env.OWNER3}\`\n
                     `);
                 break;
 
@@ -435,56 +474,10 @@ client.on('messageCreate', async message => {
             ownerId: guild.ownerId,  // Use the guild object to get the owner ID
             memberCount: guild.memberCount  // Use the guild object to get the member count
         };        
+
         fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
 
-        // Save updated owner data to file
-
-        // Ensure that the server data is initialized
-        if (!data[serverId]) {
-            data[serverId] = {
-                users: {},  // Initialize users object for the server
-                roles: {},
-                milestoneLevels: []
-            };
-        }
-
-        // Ensure that the users data is initialized
-        if (!data[serverId].users[userId] ||
-            !data[serverId].users[userId].bio ||
-            !data[serverId].users[userId].totalXp ||
-            !data[serverId].users[userId].xp ||
-            !data[serverId].users[userId].level ||
-            !data[serverId].users[userId].role ||
-            !data[serverId].users[userId].lastVote) {
-            data[serverId].users[userId] = {
-                xp: data[serverId].users[userId].xp || 0,
-                level: data[serverId].users[userId].level || 1,
-                bio: data[serverId].users[userId].bio || "",
-                roles: data[serverId].users[userId].role || [],
-                totalXp: data[serverId].users[userId].totalXp || 0,
-                lastVote: data[serverId].users[userId].lastVote || 0
-            };
-        }
-
         const member = guild.members.cache.get(userId);
-
-        // Check if the server config exists, if not, initialize it.
-        if (!serverConfigsData[serverId] || 
-            !serverConfigsData[serverId].prefix ||
-            !serverConfigsData[serverId].name ||
-            !serverConfigsData[serverId].requireConfirm) {
-            serverConfigsData[serverId] = {
-                name: guild.name,
-                blacklistedChannels: serverConfigsData[serverId].blacklistedChannels,
-                allowedChannel: serverConfigsData[serverId].allowedChannel,
-                loggingChannelId: serverConfigsData[serverId].loggingChannelId,
-                prefix: serverConfigsData[serverId].prefix || "!",
-                requireConfirm: false
-            };
-
-            // Save the newly created server config to the file
-            saveServerConfigsData(serverConfigsData);
-        }
 
         const prefix = serverConfigsData[serverId].prefix || "!";
 
@@ -492,14 +485,14 @@ client.on('messageCreate', async message => {
         if (!message.content.startsWith(prefix)) {
             trackMessageAchievements(message, achievementsData, saveAchievementsData);
             const now = Date.now();
-            const cooldownAmount = 60 * 1000;  // 60 seconds * 1000
+            const cooldownAmount = 1;  // 60 seconds * 1000
 
             if (cooldowns.has(userId)) {
                 const expirationTime = cooldowns.get(userId) + cooldownAmount;
 
                 if (now < expirationTime) {
                     const timeLeft = (expirationTime - now) / 1000;
-                    // console.log(`User ${message.author.username} is on cooldown. ${timeLeft.toFixed(1)} seconds remaining.`);
+                    console.log(`User ${message.author.username} is on cooldown. ${timeLeft.toFixed(1)} seconds remaining.`);
                     return; // User is on cooldown, so do not award XP
                 }
             }
@@ -508,13 +501,6 @@ client.on('messageCreate', async message => {
 
             const user = data[serverId].users[userId];
             const xpGain = Math.floor(Math.random() * 5) + 5; // Gain 5-10 XP per message
-
-            // Initialize totalXp if not already set
-            if (!user.totalXp) {
-                user.totalXp = 0;
-            }
-
-            // Accumulate total XP
             user.totalXp += xpGain;  // This tracks all XP gained across all levels.
             user.xp += xpGain;  // This tracks XP towards the next level.
 
@@ -534,10 +520,10 @@ client.on('messageCreate', async message => {
                 user.xp = 0;
 
                 // Send level-up message
-                if (data[serverId].milestoneLevels.includes(user.level)) {
-                    message.channel.send(`🎉 Congrats <@${message.author.id}>! You've reached level ${user.level}! This is a milestone level!`);
+                if (data[serverId].milestoneLevels.includes(level)) {
+                    message.channel.send(`🎉 Congrats <@${message.author.id}>! You've reached level ${level}! This is a milestone level!`);
                 } else {
-                    message.channel.send(`${message.author.username} leveled up to level ${user.level}!`);
+                    message.channel.send(`${message.author.username} leveled up to level ${level}!`);
                 }
 
                 // Handle role updates if necessary
@@ -572,19 +558,7 @@ client.on('messageCreate', async message => {
 
         // ? Configuration commands
         if (configurationCommands[command]) {
-            await configurationCommands[command].execute(
-                message,
-                args,
-                client,
-                data,
-                serverConfigsData,
-                achievementsData,
-                badgesData,
-                saveData,
-                saveAchievementsData,
-                saveBadgesData,
-                saveServerConfigsData
-            );
+            await configurationCommands[command].execute(message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData);
         }
 
         if (ownerCommands[command]) {

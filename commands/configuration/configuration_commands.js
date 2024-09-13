@@ -11,6 +11,8 @@ const {
 
 const fs = require('fs');
 
+const usersFilePath = 'json/users.json';
+
 module.exports = {    
     // * FIXED
     addxp: {
@@ -71,7 +73,7 @@ module.exports = {
             const user = data[message.guild.id].users[userId];
             user.xp += xpAmount;
             user.totalXp += xpAmount;
-    
+
             let level = user.level;
             const x = 100;
             const y = 1.1;
@@ -81,7 +83,7 @@ module.exports = {
             }
     
             user.level = level;
-            saveData();
+            fs.writeFileSync(usersFilePath, JSON.stringify(data, null, 4));
     
             // Final confirmation message
             return message.channel.send(`<@${userId}> now has ${user.xp} XP and is at level ${user.level}!`);
