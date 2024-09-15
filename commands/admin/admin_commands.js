@@ -1,9 +1,33 @@
 const { PermissionsBitField } = require('discord.js');
 const { EmbedBuilder } = require('@discordjs/builders');
-const { saveServerConfigsData, ensureServerData, saveData } = require('../utils');
+const { ensureUserData,
+        ensureServerData,
+        saveData,
+        saveBadgesData,
+        saveServerConfigsData,
+        saveOwnerData,
+        addBadge,
+        sendLogMessage,
+        sendStatusMessage,
+        notifyUpdate,
+        getUserData,
+        getBadgesData,
+        getServerConfigsData,
+        getOwnerData,
+        getUserBadges,
+        updateUserBio,
+        isMilestoneLevel,
+        getRolesForLevel,
+        getMilestoneLevels,
+        saveMilestoneLevels,
+        saveRoleForLevel,
+        getMilestoneLevelsFromDB,
+        getRolesFromDB,
+        getBadgesFromDB } = require('../utils');
+        
 
+// ! REMOVE
 const fs = require('fs');
-
 
 module.exports = {
     // * FIXED
@@ -57,64 +81,60 @@ module.exports = {
 
     // * FIXED
     setlevels: {
-        execute: async (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
-    
-            // Step 1: Send an initial embed asking for levels input
+
             const embed = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle("Set Milestone Levels")
                 .setDescription("Please provide the levels you want to set as milestones, separated by spaces (e.g., `5 10 15`).")
                 .setFooter({ text: "You have 60 seconds to respond." });
-    
+
             await message.channel.send({ embeds: [embed] });
-    
-            // Step 2: Await response from the user
+
             const filter = response => response.author.id === message.author.id;
             const collectedLevels = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
-    
+
             if (!collectedLevels || collectedLevels.size === 0) {
                 return message.channel.send("You did not respond in time. Please run the command again.");
             }
-    
-            // Step 3: Process the user input
+
             const levelInput = collectedLevels.first().content;
             const levels = levelInput.split(' ').map(level => parseInt(level)).filter(level => !isNaN(level)).sort((a, b) => a - b);
-    
+
             if (levels.length === 0) {
                 return message.channel.send("Invalid input. Please provide valid levels, e.g., `5 10 15`.");
             }
-    
-            // Step 4: Save the levels to the data and update immediately
-            data[message.guild.id].milestoneLevels = levels;
-    
-            // Save data immediately
-            await fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
-    
-            // Step 5: Send confirmation message
+
+            // Save the levels to the database
+            await saveMilestoneLevels(message.guild.id, levels);
+
             const confirmationEmbed = new EmbedBuilder()
                 .setColor(0x57f287) // Green for success
                 .setTitle("Milestone Levels Updated")
                 .setDescription(`Milestone levels have been updated to: ${levels.join(', ')}`)
                 .setFooter({ text: "Levels successfully set!" });
-    
+
             return message.channel.send({ embeds: [confirmationEmbed] });
         },
     },
         
     // * FIXED
     setroles: {
-        execute: async (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
-
-            if (!data[message.guild.id].milestoneLevels || data[message.guild.id].milestoneLevels.length === 0) {
+    
+            // Get current milestone levels from the database
+            const milestoneLevels = await getMilestoneLevels(message.guild.id);
+    
+            if (!milestoneLevels || milestoneLevels.length === 0) {
                 return message.channel.send("No milestone levels have been set. Please set milestone levels before assigning roles.");
             }
-
+    
             const initialEmbed = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle("Set Roles for Milestone Levels")
@@ -122,101 +142,133 @@ module.exports = {
                 .addFields(
                     {
                         name: "Current Milestone Levels",
-                        value: data[message.guild.id].milestoneLevels.join(', ') || "no levels set. Run !setlevels to set levels",
-                        inline: true
-                    },
-                    {
-                        name: "Current Roles",
-                        value: data[message.guild.id].milestoneLevels.map(level => {
-                            const roleId = data[message.guild.id].roles[level];
-                            const roleMention = roleId ? `<@&${roleId}>` : "Not set";
-                            return `${level}: ${roleMention}`;
-                        }).join('\n'),
+                        value: milestoneLevels.join(', ') || "No levels set. Run !setlevels to set levels.",
                         inline: true
                     }
                 )
                 .setFooter({ text: "Use the correct format to update roles.", iconURL: message.client.user.displayAvatarURL() });
-
+    
             await message.channel.send({ embeds: [initialEmbed] });
-
+    
             const filter = response => response.author.id === message.author.id;
-            const collected = await message.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] }).catch(() => null);
-
+            const collected = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
+    
             if (!collected || collected.size === 0) return message.channel.send("You did not respond in time. Run the command again to update roles.");
-
+    
             const response = collected.first().content.trim();
             const updates = response.split(',').map(entry => entry.trim().split(' '));
             let updatedLevels = [];
-
+    
             for (const [levelStr, roleId] of updates) {
                 const level = parseInt(levelStr, 10);
                 if (isNaN(level) || !roleId) {
                     return message.channel.send(`Invalid format for level ${levelStr}. Make sure you provide both the level and the role ID. For example -> "5 123[...], 10 123[...]"`);
                 }
-
-                if (!data[message.guild.id].roles) {
-                    data[message.guild.id].roles = {};
-                }
-
-                data[message.guild.id].roles[level] = roleId;
-                updatedLevels.push(level);
+    
+                // Save the role for the milestone level to the database
+                await saveRoleForLevel(message.guild.id, level, roleId);
+                updatedLevels.push({ level, roleId }); // Store both level and roleId
             }
-
-            await fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
-
-            const updatedLevelsString = updatedLevels.map(level => `${level}: <@&${data[message.guild.id].roles[level]}>`).join('\n');
+    
+            // Create the confirmation message showing all updated roles
+            const updatedLevelsString = updatedLevels.map(({ level, roleId }) => `${level}: <@&${roleId}>`).join('\n');
             const confirmationEmbed = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle("Roles Updated")
                 .setDescription(`The following roles have been updated:\n${updatedLevelsString}`);
-
+    
             return message.channel.send({ embeds: [confirmationEmbed] });
         },
-    },
+    },    
 
     // * FIXED
     viewsettings: {
-        execute: (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, serverConfigsData, badgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
-
+    
             const serverId = message.guild.id;
-            const blacklistedChannels = serverConfigsData[serverId].blacklistedChannels.map(id => `<#${id}>`).join("\n") || "No blacklisted channels.";
-            const rankChannel = serverConfigsData[serverId].allowedChannel ? `<#${serverConfigsData[serverId].allowedChannel}>` : "No rank channel set.";
-            const setlogchannel = serverConfigsData[serverId].loggingChannelId ? `<#${serverConfigsData[serverId].loggingChannelId}>` : "No log channel set.";
-            const guildName = serverConfigsData[serverId].name;
-            const setLevels = data[serverId].milestoneLevels.map(id => `${id}`).join(", ") || "No levels set";
-            const setRoles = Object.keys(data[serverId].roles).map(roles => `<@&${data[serverId].roles[roles]}>`).join(', ') || "No roles set";
-            const setBadges = badgesData[serverId] && badgesData[serverId].badges
-            ? Object.keys(badgesData[serverId].badges).map(badgeKey => { 
-                const badge = badgesData[serverId].badges[badgeKey]; 
-                return `${badge.emoji} ${badge.name}`; 
-            }).join(', ') || "No badges set"
-            : "No badges set";
-            const setPrefix = serverConfigsData[serverId].prefix || "!";
-        
+    
+            // Fetch server configuration from the database
+            const serverConfig = serverConfigsData[serverId] || {};
+    
+            // Prefix
+            const setPrefix = serverConfig.prefix || "!";  // If not set, fallback to default '!'
+    
+            // Fetch blacklisted channels from the database
+            const blacklistedChannels = serverConfig.blacklistedChannels && serverConfig.blacklistedChannels.length > 0
+                ? serverConfig.blacklistedChannels.map(id => `<#${id}>`).join("\n")
+                : "No blacklisted channels.";
+    
+            // Rank Channel
+            const rankChannel = serverConfig.allowedChannel
+                ? `<#${serverConfig.allowedChannel}>`
+                : "No rank channel set.";
+    
+            // Log Channel
+            const setlogchannel = serverConfig.loggingChannelId
+                ? `<#${serverConfig.loggingChannelId}>`
+                : "No log channel set.";
+    
+            // Fetch milestone levels from the database
+            const milestoneLevels = await getMilestoneLevelsFromDB(serverId);  
+            const levelsDisplay = milestoneLevels && milestoneLevels.length > 0
+                ? milestoneLevels.join(", ")
+                : "No levels set.";
+    
+            // Fetch roles from the database
+            const roles = await getRolesFromDB(serverId);  
+            const rolesDisplay = roles && roles.length > 0
+                ? roles.map(role => `<@&${role.roleId}>`).join(", ")
+                : "No roles set.";
+    
+            // Fetch badges from the database
+            const badges = await getBadgesFromDB(serverId);
+            const badgesDisplay = badges && badges.length > 0 
+                ? badges
+                    .filter(badge => badge.badgeName && badge.badgeEmoji)  // Only display badges that have both a name and an emoji set
+                    .map(badge => `${badge.badgeEmoji} ${badge.badgeName}`)
+                    .join(', ') 
+                : "No badges set.";  // If badges is null, undefined, or empty, show "No badges set."
+    
+            // Prepare embed fields safely, avoiding any undefined values
+            const embedFields = [
+                { name: "Blacklisted Channels", value: blacklistedChannels, inline: true },
+                { name: "Rank Channel", value: rankChannel, inline: true },
+                { name: "Log Channel", value: setlogchannel, inline: true },
+                { name: "Set Levels", value: levelsDisplay, inline: true },
+                { name: "Set Roles", value: rolesDisplay, inline: true },
+                { name: "Badges", value: badgesDisplay, inline: true },
+                { name: "Prefix", value: `\`${setPrefix}\``, inline: true }
+            ];
+    
+            // Ensure no undefined or null values are in the embed fields
+            const sanitizedFields = embedFields.map(field => {
+                return {
+                    name: field.name,
+                    value: field.value || 'Not set', // If any field value is falsy, set a default message
+                    inline: field.inline || false
+                };
+            });
+    
+            // Create and send the embed with all settings
             const embed = new EmbedBuilder()
                 .setColor(0x3498db)
-                .setTitle(`Server Settings for ${guildName}`)
-                .addFields(
-                    { name: "Blacklisted Channels", value: blacklistedChannels, inline: true },
-                    { name: "Rank Channel", value: rankChannel, inline: true },
-                    { name: "Log Channel", value: setlogchannel, inline: true },
-                    { name: "Set Levels", value: setLevels, inline: true },
-                    { name: "Set Roles", value: setRoles, inline: true },
-                    { name: "Badges", value: setBadges, inline: true },
-                    { name: "Prefix", value: `\`${setPrefix}\``, inline: true }
-                )
-                .setFooter({ text: "Use the appropriate commands to manage these settings.", iconURL: message.client.user.displayAvatarURL() });
-
+                .setTitle(`Server Settings for ${message.guild.name}`)
+                .addFields(sanitizedFields)
+                .setFooter({
+                    text: "Use the appropriate commands to manage these settings.",
+                    iconURL: message.client.user.displayAvatarURL()
+                });
+    
             return message.channel.send({ embeds: [embed] });
         },
     },
 
     // * FIXED
     blacklist: {
-        execute: (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -254,7 +306,7 @@ module.exports = {
 
     // * FIXED
     unblacklist: {
-        execute: (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -283,7 +335,7 @@ module.exports = {
 
     // * FIXED
     setlogchannel: {
-        execute: async (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             const client = message.client;
             
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
@@ -313,7 +365,7 @@ module.exports = {
 
     // * FIXED
     unsetlogchannel: {
-        execute: (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -328,7 +380,7 @@ module.exports = {
 
     // * FIXED
     setrankchannel: {
-        execute: (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -351,7 +403,7 @@ module.exports = {
 
     // * FIXED
     unsetrankchannel: {
-        execute: (message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }

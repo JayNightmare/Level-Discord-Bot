@@ -1,13 +1,40 @@
 const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, ActivityType, InteractionCollector } = require('discord.js');
 const { EmbedBuilder, SelectMenuBuilder, ActionRowBuilder } = require('@discordjs/builders');
 const { 
-        handleTemplateOptions,
-        trackMessageAchievements,
-        handleCustomOptions,
-        handleCustomLevelAchievements,
-        testWriteToAchievementsFile,
+        ensureUserData,
+        ensureServerData,
         saveData,
-        saveServerConfigsData } = require('../utils');
+        saveBadgesData,
+        saveServerConfigsData,
+        saveOwnerData,
+        addBadge,
+        sendLogMessage,
+        sendStatusMessage,
+        notifyUpdate,
+        getUserData,
+        getBadgesData,
+        getServerConfigsData,
+        getOwnerData,
+        getUserBadges,
+        updateUserBio,
+        isMilestoneLevel,
+        getRolesForLevel,
+        getMilestoneLevels,
+        saveMilestoneLevels,
+        saveRoleForLevel,
+        getMilestoneLevelsFromDB,
+        getRolesFromDB,
+        getBadgesFromDB,
+        getUserBadgesFromDB,
+        addUserBadgeToDB } = require('../utils.js');
+
+async function sanitizeBadges(serverBadges) {
+    return serverBadges.map((badge, index) => {
+        const badgeName = badge.badgeName || "Unknown Badge";  // Default to "Unknown Badge" if null
+        const badgeEmoji = badge.badgeEmoji || ":question:";  // Default to a question mark emoji if null
+        return `${index + 1}. ${badgeEmoji} ${badgeName}`;
+    });
+}
 
 const fs = require('fs');
 
@@ -16,7 +43,7 @@ const usersFilePath = 'json/users.json';
 module.exports = {    
     // * FIXED
     addxp: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveAchievementsData, saveBadgesData, saveServerConfigsData) => {
+        execute: async (message, args, client, data, serverConfigsData, badgesData, saveBadgesData, saveServerConfigsData) => {
             // Step 1: Check if the user has permission
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 const logChannelId = serverConfigsData[message.guild.id]?.loggingChannelId;
@@ -92,7 +119,7 @@ module.exports = {
 
     // TODO: Add Feature in future patch
     rmxp: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData) => {
+        execute: async (message, args, client, data, serverConfigsData, badgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 const logChannelId = serverConfigsData[message.guild.id]?.loggingChannelId;
                 const logChannel = message.client.channels.cache.get(logChannelId);
@@ -111,222 +138,11 @@ module.exports = {
 
             await message.reply({ embeds: [embed] });
         },
-    },  
-
-    // * FIXED
-    addachievement: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData) => {
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-                return message.channel.send("You don't have permission to use this command.");
-            }
-    
-            const serverId = message.guild.id;
-    
-            // Step 1: Ask for the user mention
-            await message.channel.send("Please mention the user you want to add an achievement to:");
-            const filter = response => response.author.id === message.author.id;
-            const collectedUser = await message.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] }).catch(() => null);
-    
-            if (!collectedUser || collectedUser.size === 0) {
-                return message.channel.send("You did not respond in time. Run the command again to add an achievement.");
-            }
-    
-            const userId = collectedUser.first().mentions.users.first()?.id;
-    
-            if (!userId) {
-                return message.channel.send("Invalid user. Please run the command again and mention a valid user.");
-            }
-    
-            // Step 2: Display available achievements or allow user to create a new one
-            const availableAchievements = achievementsData[serverId]?.availableAchievements || [];
-    
-            if (availableAchievements.length > 0) {
-                // Create an embed to show available achievements
-                const embed = new EmbedBuilder()
-                    .setColor(0x3498db)
-                    .setTitle("Available Achievements")
-                    .setDescription("Here are the available achievements you can add. If you don't find a suitable achievement, you can create a new one.")
-                    .addFields(availableAchievements.map((achievement, index) => ({
-                        name: `Achievement ${index + 1}`,
-                        value: achievement,
-                    })))
-                    .setFooter({ text: "Type the name of the achievement you want to assign or type 'new' to create one." });
-    
-                await message.channel.send({ embeds: [embed] });
-            } else {
-                await message.channel.send("No achievements are available. Would you like to make one? [y/n]");
-            }
-    
-            // Step 3: Collect achievement input
-            const collectedAchievement = await message.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] }).catch(() => null);
-    
-            if (!collectedAchievement || collectedAchievement.size === 0) {
-                return message.channel.send("You did not respond in time. Run the command again to add an achievement.");
-            }
-    
-            const achievementInput = collectedAchievement.first().content.trim();
-    
-            let achievementName;
-            if (achievementInput.toLowerCase() === 'y' || achievementInput.toLowerCase() === 'yes') {
-                await message.channel.send("Please provide the name of the new achievement:");
-                const collectedNewAchievement = await message.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] }).catch(() => null);
-                if (!collectedNewAchievement || collectedNewAchievement.size === 0) {
-                    return message.channel.send("You did not respond in time. Command cancelled.");
-                }
-                achievementName = collectedNewAchievement.first().content.trim();
-                achievementsData[serverId].availableAchievements = achievementsData[serverId].availableAchievements || [];
-                achievementsData[serverId].availableAchievements.push(achievementName);
-                saveAchievementsData(); // Save the new achievement
-            } else {
-                achievementName = achievementInput;
-                if (!availableAchievements.includes(achievementName)) {
-                    return message.channel.send("Invalid achievement. Please run the command again and choose a valid achievement.");
-                }
-            }
-    
-            // Step 4: Assign the achievement to the user within the 'users' tag
-            if (!achievementsData[serverId].users) {
-                achievementsData[serverId].users = {};
-            }
-            if (!achievementsData[serverId].users[userId]) {
-                achievementsData[serverId].users[userId] = [];
-            }
-    
-            const userAchievements = achievementsData[serverId].users[userId].achievements;
-    
-            // Check if the user already has this achievement
-            if (!userAchievements.includes(achievementName)) {
-                userAchievements.push(achievementName); // Add the achievement
-                fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
-                return message.channel.send(`Achievement "${achievementName}" added to <@${userId}>'s profile!`);
-            } else {
-                return message.channel.send(`<@${userId}> already has the "${achievementName}" achievement.`);
-            }
-        },
-    },
-
-    // * FIXED
-    rmachievement: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData) => {
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-                return message.channel.send("You don't have permission to use this command.");
-            }
-    
-            const serverId = message.guild.id;
-    
-            // Step 1: Ask for the user mention
-            await message.channel.send("Please mention the user you want to remove an achievement from:");
-            const filter = response => response.author.id === message.author.id;
-            const collectedUser = await message.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] }).catch(() => null);
-    
-            if (!collectedUser || collectedUser.size === 0) {
-                return message.channel.send("You did not respond in time. Run the command again to remove an achievement.");
-            }
-    
-            const userId = collectedUser.first().mentions.users.first()?.id;
-    
-            if (!userId) {
-                return message.channel.send("Invalid user. Please run the command again and mention a valid user.");
-            }
-    
-            // Ensure the user has achievements data
-            if (!achievementsData[serverId] || !achievementsData[serverId].users || !achievementsData[serverId].users[userId]) {
-                return message.channel.send(`<@${userId}> does not have any achievements.`);
-            }
-    
-            const userAchievements = achievementsData[serverId].users[userId].achievements;
-    
-            if (userAchievements.length === 0) {
-                return message.channel.send(`<@${userId}> does not have any achievements to remove.`);
-            }
-    
-            // Step 2: Display the achievements in an embed
-            const embed = new EmbedBuilder()
-                .setColor(0x3498db)
-                .setTitle(`${message.guild.members.cache.get(userId).displayName}'s Achievements`)
-                .setDescription("Here are the achievements you can remove:")
-                .addFields(
-                    userAchievements.map((achievement, index) => ({
-                        name: `Achievement ${index + 1}`,
-                        value: achievement,
-                        inline: true,
-                    }))
-                )
-                .setFooter({ text: "Type the name of the achievement you want to remove." });
-    
-            await message.channel.send({ embeds: [embed] });
-    
-            // Step 3: Collect the achievement to remove
-            const collectedAchievement = await message.channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] }).catch(() => null);
-    
-            if (!collectedAchievement || collectedAchievement.size === 0) {
-                return message.channel.send("You did not respond in time. Run the command again to remove an achievement.");
-            }
-    
-            const achievementName = collectedAchievement.first().content.trim();
-    
-            const index = userAchievements.indexOf(achievementName);
-            if (index > -1) {
-                userAchievements.splice(index, 1); // Remove the achievement
-                fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4)); // Save the updated data
-                return message.channel.send(`Achievement "${achievementName}" removed from <@${userId}>'s profile!`);
-            } else {
-                return message.channel.send(`<@${userId}> does not have the "${achievementName}" achievement.`);
-            }
-        },
-    },    
-
-    // * FIXED
-    setachievements: {
-        execute: async (message, interaction, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData) => {
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-                return message.channel.send("You don't have permission to use this command.");
-            }
-    
-            const serverId = message.guild.id;
-    
-            // Embed for initial choice
-            const embed = new EmbedBuilder()
-                .setColor(0x3498db)
-                .setTitle("Set Achievements")
-                .setDescription("Choose to use Template Achievements or create Custom Achievements")
-                .setFooter({ text: "Choose an option below:", iconURL: message.client.user.displayAvatarURL() });
-    
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new SelectMenuBuilder()
-                        .setCustomId('achievements_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Template Options', value: 'template' },
-                            { label: 'Custom Options (Coming Soon)', value: 'custom' }
-                        ])
-                );
-    
-            await message.channel.send({ embeds: [embed], components: [row] });
-    
-            // Collect user selection
-            const collected = interaction.values[0];
-
-            if (collected === 'template') {
-                // Handle template options (message-based achievements)
-                await handleTemplateOptions(message, interaction, achievementsData, saveAchievementsData);
-            } else if (collected === 'custom') {
-                // Handle custom options
-                const customEmbed = new EmbedBuilder()
-                    .setColor(0xffcc00)
-                    .setTitle("Custom Achievements")
-                    .setDescription("Custom achievements options are currently under development! Stay tuned.")
-                    .setFooter({ text: "Coming Soon", iconURL: message.client.user.displayAvatarURL() });
-                
-                return message.channel.send({ embeds: [customEmbed] });
-            }
-        }
-    },
+    },   
 
     // * FIXED
     addbadge: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, client, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -342,61 +158,40 @@ module.exports = {
             const userId = userMsg.first().mentions.users.first()?.id;
             if (!userId) return message.channel.send("Invalid user. Command cancelled.");
     
-            // Step 2: Display available badges
-            const serverBadges = badgesData[message.guild.id]?.badges || {};
-            const availableBadges = Object.values(serverBadges).map(badge => badge.name);
-            
-            if (availableBadges.length === 0) return message.channel.send("No badges available to assign.");
+            // Step 2: Fetch available badges from the database
+            const serverBadges = await getBadgesFromDB(message.guild.id);
+            if (!serverBadges || serverBadges.length === 0) return message.channel.send("No badges available to assign.");
+    
+            // Step 3: Sanitize the badges before displaying
+            const sanitizedBadges = await sanitizeBadges(serverBadges);
     
             const badgeEmbed = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle("Available Badges")
-                .setDescription(availableBadges.map((badge, index) => `${index + 1}. ${badge}`).join("\n"))
+                .setDescription(sanitizedBadges.join("\n"))
                 .setFooter({ text: "Please type the name of the badge you want to assign." });
     
             await message.channel.send({ embeds: [badgeEmbed] });
     
-            // Step 3: Ask for the badge name
+            // Step 4: Ask for the badge name
             const badgeMsg = await message.channel.awaitMessages({ filter, max: 1, time: 30000, errors: ['time'] }).catch(() => null);
             if (!badgeMsg) return message.channel.send("No badge name provided. Command cancelled.");
     
             const badgeName = badgeMsg.first().content.trim();
-            const badgeEntry = Object.values(serverBadges).find(badge => badge.name === badgeName);
+            const badgeEntry = serverBadges.find(badge => badge.badgeName === badgeName);
     
             if (!badgeEntry) return message.channel.send("Invalid badge name. Command cancelled.");
     
-            // Initialize the badgesData if not present
-            if (!badgesData[message.guild.id]) {
-                badgesData[message.guild.id] = {};
-            }
+            // Step 5: Add the badge to the user
+            await assignBadgeToUser(message.guild.id, userId, badgeEntry);
     
-            if (!badgesData[message.guild.id][userId]) {
-                badgesData[message.guild.id][userId] = [];
-            }
-    
-            const userBadges = badgesData[message.guild.id][userId];
-    
-            // Add the badge if the user doesn't already have it
-            if (!userBadges.includes(badgeName)) {
-                userBadges.push(badgeName);
-                // Save the updated badges data
-                try {
-                    fs.writeFileSync('json/badges.json', JSON.stringify(badgesData, null, 4));
-                    console.log("Badge data successfully saved.");
-                } catch (err) {
-                    console.error("Error saving badges data:", err);
-                    return message.channel.send("Failed to save badges data. Please try again.");
-                }  
-                return message.channel.send(`Badge "${badgeName}" added to <@${userId}>'s profile!`);
-            } else {
-                return message.channel.send(`<@${userId}> already has the "${badgeName}" badge.`);
-            }
+            return message.channel.send(`Badge "${badgeName}" added to <@${userId}>'s profile!`);
         },
-    },     
+    },   
 
     // * FIXED
     rmbadge: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData) => {
+        execute: async (message, args, client, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -446,18 +241,18 @@ module.exports = {
 
     // * FIXED
     viewbadges: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData) => {
+        execute: async (message, args, client, data, serverConfigsData, badgesData, saveData, saveBadgesData, saveServerConfigsData) => {
             const serverId = message.guild.id;
             const mentionedUser = message.mentions.users.first() || message.author;
             const userId = mentionedUser.id;
     
             // Ensure the badges structure exists in badgesData
-            if (!badgesData[serverId] || !badgesData[serverId].badges) {
+            if (!badgesData || !badgesData.badges) {
                 return message.channel.send("No badges have been set on this server.");
             }
     
-            const serverBadges = badgesData[serverId].badges; // All badges for the server
-            const userBadges = badgesData[serverId][userId] || []; // Badges earned by the user
+            const serverBadges = badgesData.badges; // All badges for the server
+            const userBadges = badgesData[userId] || []; // Badges earned by the user
     
             // Display User's Badges
             const userBadgesDisplay = userBadges.length > 0
@@ -494,7 +289,7 @@ module.exports = {
     
     // * FIXED
     setbadges: {
-        execute: async (message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData) => {
+        execute: async (message, args, client, data, serverConfigsData, badgesData, saveData, saveBadgesData, saveServerConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -503,12 +298,12 @@ module.exports = {
             const mentionedUser = message.mentions.users.first() || message.author;
             const userId = mentionedUser.id;
     
-            if (!data[serverId].milestoneLevels || data[serverId].milestoneLevels.length === 0) {
+            if (!data.milestoneLevels || data.milestoneLevels.length === 0) {
                 return message.channel.send("No milestone levels have been set. Please set milestone levels before assigning badges.");
             }
     
-            const badges = badgesData[serverId].badges;
-            const serverUsers = badgesData[serverId];
+            const badges = badgesData.badges;
+            const serverUsers = badgesData;
     
             try {
                 if (badges) {
@@ -519,12 +314,12 @@ module.exports = {
                         .addFields(
                             {
                                 name: "Current Milestone Levels",
-                                value: data[serverId].milestoneLevels.join(', ') || "No levels set. Run !setlevels to set levels",
+                                value: data.milestoneLevels.join(', ') || "No levels set. Run !setlevels to set levels",
                                 inline: true
                             },
                             {
                                 name: "Current Badges",
-                                value: data[serverId].milestoneLevels.map(level => {
+                                value: data.milestoneLevels.map(level => {
                                     const badgeId = `level_${level}`;
                                     const badge = badges[badgeId];
                                     const badgeDisplay = badge ? `${badge.emoji} ${badge.name}` : "Not set";
@@ -556,8 +351,8 @@ module.exports = {
             if (input.startsWith("remove")) {
                 const levelToRemove = parseInt(input.split(" ")[1], 10);
 
-                if (isNaN(levelToRemove) || !data[serverId].milestoneLevels.includes(levelToRemove)) {
-                    return message.channel.send(`Invalid level. Please select a valid milestone level from: ${data[serverId].milestoneLevels.join(', ')}`);
+                if (isNaN(levelToRemove) || !data.milestoneLevels.includes(levelToRemove)) {
+                    return message.channel.send(`Invalid level. Please select a valid milestone level from: ${data.milestoneLevels.join(', ')}`);
                 }
 
                 const badgeId = `level_${levelToRemove}`;
@@ -601,8 +396,8 @@ module.exports = {
             const levelStr = input;
             const level = parseInt(levelStr, 10);
     
-            if (isNaN(level) || !data[serverId].milestoneLevels.includes(level)) {
-                return message.channel.send(`Invalid level. Please select a valid milestone level from: ${data[serverId].milestoneLevels.join(', ')}`);
+            if (isNaN(level) || !data.milestoneLevels.includes(level)) {
+                return message.channel.send(`Invalid level. Please select a valid milestone level from: ${data.milestoneLevels.join(', ')}`);
             }
     
             await message.channel.send("Please provide the emoji you want to set for this badge:");

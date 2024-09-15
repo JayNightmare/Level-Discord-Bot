@@ -5,305 +5,494 @@ const fs = require('fs');
 const { log } = require('console');
 require('dotenv').config(); 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
-
-// ? Load Data
-const usersFilePath = 'json/users.json';
-const achievementsFilePath = 'json/achievements.json';
-const badgesFilePath = 'json/badges.json';
-const serverConfigsFilePath = 'json/serverConfigs.json';
-const ownerFilePath = 'json/owner.json';
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('./bot.db');
 
 // ? Load data from the file
 let data = {};
-let achievementsData;
 let badgesData = {};
 let serverConfigsData = {};
 let ownerData = {};
 
 // ? Load all files
-if (fs.existsSync(usersFilePath)) {
-    data = JSON.parse(fs.readFileSync(usersFilePath, 'utf8'));
-} else {
-    data = {}; // * Initialize an empty data object if file doesn't exist
-    saveData(); // * Save the initial structure to the file
+
+function getUserData(serverId, userId) {
+    return new Promise((resolve, reject) => {
+        db.get(`
+            SELECT xp, level, bio 
+            FROM users 
+            WHERE serverId = ? AND userId = ?`, 
+            [serverId, userId], (err, row) => {
+                if (err) {
+                    console.error(err.message);
+                    return reject(err);
+                }
+                // Return default data if user does not exist
+                if (!row) {
+                    resolve({ xp: 0, level: 1, bio: "", roles: [], totalXp: 0, lastVote: 0 });
+                } else {
+                    resolve(row);
+                }
+            });
+    });
+} 
+
+// //
+
+function getUserBadges(serverId, userId) {
+    return new Promise((resolve, reject) => {
+        db.all(`
+            SELECT badgeName AS name, badgeEmoji AS emoji 
+            FROM badges 
+            WHERE serverId = ? AND userId = ?`, 
+            [serverId, userId], (err, rows) => {
+                if (err) {
+                    console.error(err.message);
+                    return reject(err);
+                }
+                resolve(rows || []);  // Return an empty array if no badges found
+            });
+    });
 }
 
-if (fs.existsSync(achievementsFilePath)) {
-    achievementsData = JSON.parse(fs.readFileSync(achievementsFilePath, 'utf8'));
-} else {
-    achievementsData = {};
-    saveAchievementsData();
+// //
+
+function getBadgesData(serverId, userId) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT * FROM badges WHERE serverId = ? AND userId = ?`, [serverId, userId], (err, row) => {
+            if (err) {
+                console.error(err.message);
+                return reject(null);
+            }
+            resolve(row || { badges: "[]" }); // Return default if no badges found
+        });
+    });
 }
 
-if (fs.existsSync(badgesFilePath)) {
-    badgesData = JSON.parse(fs.readFileSync(badgesFilePath, 'utf8'));
-} else {
-    badgesData = {};
-    saveBadgesData();
+// //
+
+function getServerConfigsData(serverId) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT * FROM serverConfigsData WHERE serverId = ?`, [serverId], (err, row) => {
+            if (err) {
+                console.error(err.message);
+                return reject(err);  // Reject the promise in case of an error
+            }
+            resolve(row || null);  // Resolve with server config or null if not found
+        });
+    });
 }
 
-if (fs.existsSync(serverConfigsFilePath)) {
-    serverConfigsData = JSON.parse(fs.readFileSync(serverConfigsFilePath, 'utf8'));
-} else {
-    serverConfigsData = {};
-    saveServerConfigsData();
+// //
+
+function getOwnerData(serverId) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT * FROM ownerData WHERE serverId = ?`, [serverId], (err, row) => {
+            if (err) {
+                console.error(err.message);
+                return reject(err);  // Reject the promise in case of an error
+            }
+            resolve(row || null);
+        });
+    });
 }
 
-if (fs.existsSync(ownerFilePath)) {
-    ownerData = JSON.parse(fs.readFileSync(ownerFilePath, 'utf8')); // Fixed path issue
-} else {
-    ownerData = {}; // Initializing empty object
-    saveOwnerData(ownerData); // Save the initialized empty data
+// //
+
+function getMilestoneLevels(serverId) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT level FROM milestoneLevels WHERE serverId = ?`, [serverId], (err, row) => {
+            if (err) {
+                console.error('Error fetching milestone levels:', err.message);
+                return reject(err);
+            }
+            if (row) {
+                resolve(JSON.parse(row.level));
+            } else {
+                resolve([]);  // Return an empty array if no levels are set for the server
+            }
+        });
+    });
 }
 
-function debugError(guild) {
-// Store owner and member information in owner.json
-    ownerData[guild.ownerId] = {
-        parameter1: guild.ownerId,
-        parameter2: guild.memberCount
-    };
+function saveMilestoneLevels(serverId, milestoneLevels) {
+    return new Promise((resolve, reject) => {
+        db.run(`
+            INSERT INTO milestoneLevels (serverId, level)
+            VALUES (?, ?)
+            ON CONFLICT(serverId) DO UPDATE SET
+            level = excluded.level
+        `, [serverId, JSON.stringify(milestoneLevels)], (err) => {
+            if (err) {
+                console.error('Error saving milestone levels:', err.message);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
 }
+
+// //
+
+async function getRolesForLevel(serverId, userLevel) {
+    return new Promise((resolve, reject) => {
+        db.all(`
+            SELECT roleId 
+            FROM roles 
+            WHERE serverId = ? AND levelRequired <= ?
+        `, [serverId, userLevel], (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows.map(row => row.roleId));  // Return an array of role IDs
+        });
+    });
+}
+
+function saveRoleForLevel(serverId, levelRequired, roleId) {
+    return new Promise((resolve, reject) => {
+        db.run(`
+            INSERT INTO roles (serverId, levelRequired, roleId)
+            VALUES (?, ?, ?)
+            ON CONFLICT(serverId, levelRequired) DO UPDATE SET
+            roleId = excluded.roleId
+        `, [serverId, levelRequired, roleId], (err) => {
+            if (err) {
+                console.error("Error saving role for level:", err.message);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}
+
+// //
+
+// * Update Bio
+function updateUserBio(serverId, userId, bio) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            await ensureUserData(serverId, userId);  // Ensure the user exists first
+            db.run(`
+                UPDATE users 
+                SET bio = ? 
+                WHERE serverId = ? AND userId = ?
+            `, [bio, serverId, userId], (err) => {
+                if (err) {
+                    console.error("Error updating user bio:", err.message);
+                    return reject(err);
+                }
+                resolve();
+            });
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+// //
 
 function ensureUserData(serverId, userId) {
-    // ? Debugging - Check content inside json file
-    // console.log(`Ensuring user data for serverId: ${serverId}, userId: ${userId}`);
-    // console.log('User Data:', JSON.stringify(data, null, 2));
-    // console.log('Achievement Data:', JSON.stringify(achievementsData, null, 2));
-    // console.log('Badge Data:', JSON.stringify(badgesData, null, 2));
-    // console.log('Server Data:', JSON.stringify(serverConfigsData, null, 2));
-
-    // * Ensure the server data exists
-    if (!data[serverId]) {
-        data[serverId] = {
-            users: {},
-            roles: {},
-            milestoneLevels: [],
-        };
-        saveData();
-    }
-
-    // * Ensure the user data exists
-    if (!data[serverId].users[userId]) {
-        data[serverId].users[userId] = {
-            xp: 0,
-            level: 1,
-            bio: "",
-            roles: [],
-            totalXp: 0,
-            lastVote: 0
-        };
-        saveData();
-    }
-
-    // * Ensure the server achievements data exists
-    if (!achievementsData[serverId]) {
-        achievementsData[serverId] = {
-            customAchievements: {
-                levels: {},
-                times: {},
-                events: {}
-            },
-            templates: {
-                messageAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                levelAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                timeAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                eventAchievements: {
-                    enabled: false,
-                    achievements: {}
-                }
-            },
-            users: {}  // ? Initialize users object for tracking message achievements
-        };
-        try {
-            fs.writeFileSync(achievementsFilePath, JSON.stringify(achievementsData, null, 4));
-            // console.log("Achievements data saved.");
-        } catch (err) {
-            console.error("Error saving achievements data:", err);
-        }
-    }
-
-    // * Ensure the server badges data exists
-    if (!badgesData[serverId]) {
-        badgesData[serverId] = {
-            badges: {}
-        };
-        saveBadgesData();
-    }
-
-    // * Ensure the user badges data exists
-    if (!badgesData[serverId][userId]) {
-        badgesData[serverId][userId] = [];
-        saveBadgesData();
-    }
+    return new Promise((resolve, reject) => {
+        db.run(`
+            INSERT OR IGNORE INTO users (serverId, userId, xp, totalXp, level, bio )
+            VALUES (?, ?, 0, 0, 1, '')
+        `, [serverId, userId], (err) => {
+            if (err) {
+                console.error("Error ensuring user exists:", err.message);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
 }
 
-function ensureServerData(serverId, guild) {
-    if (!serverConfigsData[serverId]) {
-        serverConfigsData[serverId] = {
-            name: guild.name,
-            blacklistedChannels: [],
-            allowedChannel: null,
-            loggingChannelId: null,
-            prefix: "!",
-            requireConfirm: false
-        };
+// //
 
-        saveServerConfigsData(serverConfigsData);  // * Ensure to save right after initialization
+async function isMilestoneLevel(serverId, level) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT level FROM milestoneLevels WHERE serverId = ? AND level = ?`, [serverId, level], (err, row) => {
+            if (err) return reject(err);
+            resolve(!!row); // Return true if the level is a milestone
+        });
+    });
+}
+
+// //
+
+// Fetch milestone levels from SQLite
+async function getMilestoneLevelsFromDB(serverId) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT level FROM milestoneLevels WHERE serverId = ?`, [serverId], (err, rows) => {
+            if (err) {
+                console.error(err.message);
+                return reject(err);
+            }
+            resolve(rows.map(row => row.level));  // Return an array of levels
+        });
+    });
+}
+
+// Fetch roles from SQLite
+async function getRolesFromDB(serverId) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT roleId FROM roles WHERE serverId = ?`, [serverId], (err, rows) => {
+            if (err) {
+                console.error(err.message);
+                return reject(err);
+            }
+            resolve(rows);  // Return array of role objects
+        });
+    });
+}
+
+async function getRolesData(serverId) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT * FROM roles WHERE serverId = ?`, [serverId], (err, rows) => {
+            if (err) {
+                console.error(err.message);
+                return reject(err);
+            }
+            resolve(rows);  // Return array of role objects
+        });
+    });
+}
+
+// //
+
+// ? For Badges
+async function getBadgesFromDB(serverId) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT badgeName, badgeEmoji FROM badges WHERE serverId = ?`, [serverId], (err, rows) => {
+            if (err) {
+                console.error("Error fetching badges from the database:", err.message);
+                return reject(err);
+            }
+            resolve(rows || []);
+        });
+    });
+}
+
+// Function to get badges for a specific user
+async function getUserBadgesFromDB(serverId, userId) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT badgeName FROM badges WHERE serverId = ? AND userId = ?`, [serverId, userId], (err, rows) => {
+            if (err) {
+                console.error("Error fetching user badges from the database:", err.message);
+                return reject(err);
+            }
+            resolve(rows.map(row => row.badgeName) || []);
+        });
+    });
+}
+
+// Function to add a badge to a user in the database
+async function addUserBadgeToDB(serverId, userId, badgeName) {
+    return new Promise((resolve, reject) => {
+        db.run(`
+            INSERT INTO badges (serverId, userId, badgeName, badgeEmoji) 
+            VALUES (?, ?, ?, ?) 
+            ON CONFLICT(serverId, userId, badgeName, badgeEmoji) DO NOTHING
+        `, [serverId, userId, badgeName, badgeEmoji], (err) => {
+            if (err) {
+                console.error("Error adding badge to user in the database:", err.message);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}
+
+// //
+
+function saveServerConfig(serverId, serverData) {
+    return new Promise((resolve, reject) => {
+        db.run(`
+            INSERT INTO serverConfigsData (serverId, name, blacklistedChannels, allowedChannel, loggingChannelId, prefix, requireConfirm)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [serverId, serverData.name, serverData.blacklistedChannels, serverData.allowedChannel, serverData.loggingChannelId, serverData.prefix, serverData.requireConfirm], (err) => {
+            if (err) {
+                console.error("Error saving server configuration:", err.message);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}
+
+async function ensureServerData(serverId, guild) {
+    // Check if server data exists in the database
+    const serverConfig = await getServerConfigsData(serverId);
+    
+    // If server configuration doesn't exist, initialize with default values
+    try {
+        if (!serverConfig) {
+            console.log("No server! Adding Data");
+            const defaultServerData = {
+                serverId: serverId,
+                name: guild.name,
+                blacklistedChannels: JSON.stringify([]),  // Store as JSON array
+                allowedChannel: null,
+                loggingChannelId: null,
+                prefix: "!",  // Default prefix
+                requireConfirm: false
+            };
+    
+            // Save the default server configuration into the database
+            await saveServerConfig(serverId, defaultServerData);
+    
+            console.log(`Initialized default server configuration for serverId: ${serverId}`);
+        }
+    } catch(err) {
+        console.log("Server Already Exists! No Data Added - " + err);
+    }
+
+    // Ensure that the badges, roles, and milestone levels are initialized
+    const badgesData = await getBadgesData(serverId);
+    const rolesData = await getRolesData(serverId);
+    const milestoneLevelsData = await getMilestoneLevelsFromDB(serverId);
+
+    // Initialize badges if not present
+    if (!badgesData || badgesData.length === 0) {
+        const defaultBadges = []; // Empty badges array by default
+        await saveBadgeData(serverId, null, defaultBadges);
+        console.log(`Initialized badges for serverId: ${serverId}`);
+    }
+
+    // Initialize roles if not present
+    if (!rolesData || rolesData.length === 0) {
+        const defaultRoles = { roles: {} }; // No roles set initially
+        await saveRoles(serverId, defaultRoles);
+        console.log(`Initialized roles for serverId: ${serverId}`);
+    }
+
+    // Initialize milestone levels if not present
+    if (!milestoneLevelsData || milestoneLevelsData.length === 0) {
+        const defaultMilestoneLevels = [];
+        await saveMilestoneLevels(serverId, defaultMilestoneLevels);
+        console.log(`Initialized milestone levels for serverId: ${serverId}`);
     }
 }
 
 // * Helper function to save data
-function saveData() {
-    // console.log("Saving users data:", JSON.stringify(data, null, 4));  // Debug log before saving
-    fs.writeFileSync(usersFilePath, JSON.stringify(data, null, 4));
+function saveData(serverId, userId, userData) {
+    db.run(`
+        INSERT OR IGNORE INTO users (serverId, userId, xp, totalXp, level, bio)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(serverId, userId) DO UPDATE SET
+        xp = excluded.xp, totalXp = excluded.totalXp, level = excluded.level, bio = excluded.bio
+    `, [serverId, userId, userData.xp, userData.totalXp, userData.level, userData.bio ], (err) => {
+        if (err) {
+            console.error(err.message);
+        }
+    });
 }
 
-function saveServerConfigsData(serverConfigsData) {
-    // console.log("Saving server configs data:", JSON.stringify(serverConfigsData, null, 4));  // Debug log before saving
-    fs.writeFileSync(serverConfigsFilePath, JSON.stringify(serverConfigsData, null, 4));
+function saveServerConfigsData(serverId, config) {
+    db.run(`
+        INSERT INTO servers (serverId, name, blacklistedChannels, allowedChannel, loggingChannelId, prefix, requireConfirm)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(serverId) DO UPDATE SET
+        name = excluded.name, blacklistedChannels = excluded.blacklistedChannels,
+        allowedChannel = excluded.allowedChannel, loggingChannelId = excluded.loggingChannelId,
+        prefix = excluded.prefix, requireConfirm = excluded.requireConfirm
+    `, [serverId, config.name, JSON.stringify(config.blacklistedChannels), config.allowedChannel, config.loggingChannelId, config.prefix, config.requireConfirm], (err) => {
+        if (err) {
+            console.error(err.message);
+        }
+    });
 }
 
-function saveAchievementsData() {
-    try {
-        fs.writeFileSync(achievementsFilePath, JSON.stringify(achievementsData, null, 4));
-        // console.log("Achievements data saved.");
-    } catch (err) {
-        console.error("Error saving achievements data:", err);
-    }
+function saveBadgesData(serverId, userId, badges) {
+    db.run(`
+        INSERT INTO badges (serverId, userId, badges)
+        VALUES (?, ?, ?)
+        ON CONFLICT(serverId, userId) DO UPDATE SET
+        badges = excluded.badges
+    `, [serverId, userId, JSON.stringify(badges)], (err) => {
+        if (err) {
+            console.error(err.message);
+        }
+    });
 }
 
-function saveBadgesData() {
-    try {
-        fs.writeFileSync(badgesFilePath, JSON.stringify(badgesData, null, 4));
-    } catch (err) {
-        console.error("Failed to save badges data:", err);
-    }
-}
-
-// * Function to add an achievement to a user's profile
-function addAchievement(serverId, userId, achievementName, badgeName = null, achievementType = 'custom', category = 'levels', levelOrTimeOrEvent = '') {
-    ensureUserData(serverId, userId);
-
-    // Initialize the user achievements if not already present
-    if (!achievementsData[serverId][userId]) {
-        achievementsData[serverId][userId] = {
-            customAchievements: {
-                levels: {},
-                times: {},
-                events: {}
-            },
-            templates: {
-                levelAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                timeAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                eventAchievements: {
-                    enabled: false,
-                    achievements: {}
+async function saveRoles(serverId, rolesData) {
+    return new Promise((resolve, reject) => {
+        // Assuming rolesData is an object with levels as keys and roleIds as values
+        for (const [levelRequired, roleId] of Object.entries(rolesData.roles)) {
+            db.run(
+                `INSERT INTO roles (serverId, roleId, levelRequired) VALUES (?, ?, ?)`,
+                [serverId, roleId, levelRequired],
+                function (err) {
+                    if (err) {
+                        console.error(`Error inserting role for server ${serverId}:`, err.message);
+                        return reject(err);
+                    }
                 }
-            }
-        };
-    }
-
-    // Handle custom achievements
-    if (achievementType === 'custom') {
-        if (!achievementsData[serverId][userId].customAchievements[category][levelOrTimeOrEvent]) {
-            achievementsData[serverId][userId].customAchievements[category][levelOrTimeOrEvent] = achievementName;
-        } else {
-            return false; // Achievement already exists
+            );
         }
-    } 
-
-    // Handle template achievements
-    else if (achievementType === 'template') {
-        if (achievementsData[serverId][userId].templates[`${category}Achievements`].enabled) {
-            if (!achievementsData[serverId][userId].templates[`${category}Achievements`].achievements[levelOrTimeOrEvent]) {
-                achievementsData[serverId][userId].templates[`${category}Achievements`].achievements[levelOrTimeOrEvent] = achievementName;
-            } else {
-                return false; // Achievement already exists
-            }
-        } else {
-            return false; // Template not enabled
-        }
-    } 
-
-    else {
-        return false; // Invalid achievement type
-    }
-
-    // Log the updated achievements data
-    console.log('Achievements Data Before Saving:', JSON.stringify(achievementsData, null, 4));
-
-    // Optionally add a badge if specified
-    if (badgeName) {
-        addBadge(serverId, userId, badgeName);
-    }
-
-    // Save the updated achievements data
-    try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
-        console.log("Achievements data successfully initialized and saved.");
-    } catch (err) {
-        console.error("Error initializing achievements data:", err);
-        return message.channel.send("Failed to initialize achievements data.");
-    }
-    return true;
+        resolve();
+    });
 }
+
+function saveOwnerData(serverId, ownerId, memberCount) {
+    return new Promise((resolve, reject) => {
+        db.run(`
+            INSERT INTO ownerData (serverId, ownerId, memberCount)
+            VALUES (?, ?, ?)
+            ON CONFLICT(serverId) DO UPDATE SET
+            ownerId = excluded.ownerId, memberCount = excluded.memberCount
+        `, [serverId, ownerId, memberCount], (err) => {
+            if (err) {
+                console.error("Error saving owner data:", err.message);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}
+
+// //
 
 function addBadge(serverId, userId, badgeName, badgeDetails = null) {
     ensureUserData(serverId, userId);
 
-    if (!badgesData[serverId].badges) {
-        badgesData[serverId].badges = {};
-    }
+    getBadgesData(serverId, userId, (userBadges) => {
+        if (!userBadges) {
+            userBadges = [];
+        }
 
-    if (!badgesData[serverId][userId]) {
-        badgesData[serverId][userId] = [];
-    }
+        if (badgeDetails) {
+            // Add or update badge details in the database
+            saveBadgesData(serverId, userId, badgeDetails);
+        }
 
-    if (badgeDetails) {
-        badgesData[serverId].badges[badgeName] = badgeDetails;
-        saveBadgesData();
-    }
-
-    if (!badgesData[serverId][userId].includes(badgeName)) {
-        badgesData[serverId][userId].push(badgeName);
-        saveBadgesData();
-        return true;
-    }
-    return false;
+        if (!userBadges.includes(badgeName)) {
+            userBadges.push(badgeName);
+            saveBadgesData(serverId, userId, userBadges);
+            return true;
+        }
+        return false;
+    });
 }
 
 function sendLogMessage(serverId, messageText) {
-    const logChannelId = serverConfigsData[serverId]?.loggingChannelId;
-    if (logChannelId) {
-        const logChannel = client.channels.cache.get(logChannelId);
-        if (logChannel) {
-            logChannel.send(messageText);
+    getServerConfigsData(serverId, (config) => {
+        const logChannelId = config?.loggingChannelId;
+        if (logChannelId) {
+            const logChannel = client.channels.cache.get(logChannelId);
+            if (logChannel) {
+                logChannel.send(messageText);
+            } else {
+                console.log(`Log channel not found or bot lacks access to the specified channel for server ${serverId}.`);
+            }
         } else {
-            console.log(`Log channel not found or bot lacks access to the specified channel for server ${serverId}.`);
+            console.log(`No logging channel set for server ${serverId}.`);
         }
-    } else {
-        console.log(`No logging channel set for server ${serverId}.`);
-    }
+    });
 }
 
 // * Send status to logging channel
 async function sendStatusMessage(serverId, status) {
-    const logChannelId = serverConfigsData[serverId]?.loggingChannelId;
+    const logChannelId = serverConfigsData?.loggingChannelId;
     const logChannel = client.channels.cache.get(logChannelId);
     if (!logChannel) {
         // console.error(`Logging channel not found in the client's cache for server: ${serverId}.`);
@@ -328,7 +517,7 @@ async function sendStatusMessage(serverId, status) {
 async function notifyUpdate(client) {
     try {
         for (const serverId in data) {
-            if (!serverConfigsData[serverId]) continue;
+            if (!serverConfigsData) continue;
 
             // const prefixFinder = serverConfigsData[serverId].prefix || "!";
             if (data.hasOwnProperty(serverId)) {
@@ -396,428 +585,32 @@ async function notifyUpdate(client) {
     }
 }
 
-// * Function to enable or disable templates
-async function handleTemplateOptions(message, interaction, achievementsData, saveAchievementsData) {
-    const serverId = message.guild.id;
-
-    // Initialize achievements if not already done
-    if (!achievementsData[serverId]) {
-        achievementsData[serverId] = {
-            customAchievements: {
-                levels: {},
-                times: {},
-                events: {}
-            },
-            templates: {
-                messageAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                levelAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                timeAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                eventAchievements: {
-                    enabled: false,
-                    achievements: {}
-                }
-            },
-            users: {}
-        };
-    }
-
-    // Create embed to display template options
-    let updatedEmbed;
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle("Template Achievements")
-        .setDescription("Enable or disable templates by saying `enable` or `disable` followed by the template number.")
-        .addFields(
-            { name: "1️⃣ Level-Based Achievements", value: achievementsData[serverId].templates.levelAchievements.enabled ? "Enabled ✅" : "Disabled ❌" },
-            { name: "2️⃣ Time-Based Achievements", value: "Coming soon 🚧" },
-            { name: "3️⃣ Event-Based Achievements", value: "Coming soon 🚧" },
-            { name: "4️⃣ Message-Based Achievements", value: achievementsData[serverId].templates.messageAchievements.enabled ? "Enabled ✅" : "Disabled ❌" },
-        )
-        .setFooter({ text: "Choose an option below:", iconURL: message.client.user.displayAvatarURL() });
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-
-    // Collect user response
-    const filter = response => response.author.id === interaction.user.id;
-    const collected = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => "null");
-
-    
-    const input = collected.first().content.trim().toLowerCase();    
-    if (!input || input.size === 0) return message.channel.send("You did not respond in time. Please try again.");
-    const templateNumbers = input.match(/\d+/g)?.map(Number) || [];
-
-    if (input.startsWith("enable")) {
-        templateNumbers.forEach(num => {
-            if (num === 1) {
-                achievementsData[serverId].templates.levelAchievements.enabled = true;
-                // Update the embed with the new status
-                updatedEmbed = new EmbedBuilder(embed)
-                    .setDescription("Templates have been updated.")
-                    .setFields(
-                        { name: "1️⃣ Level-Based Achievements", value: achievementsData[serverId].templates.levelAchievements.enabled ? "Enabled ✅" : "Disabled ❌" },
-                        { name: "2️⃣ Time-Based Achievements", value: "Coming soon 🚧" },
-                        { name: "3️⃣ Event-Based Achievements", value: "Coming soon 🚧" },
-                        { name: "4️⃣ Message-Based Achievements", value: achievementsData[serverId].templates.messageAchievements.enabled ? "Enabled ✅" : "Disabled ❌" }
-                    );
-            }
-            else if (num === 2 || num === 3) {
-                updatedEmbed = new EmbedBuilder(embed)
-                    .setTitle("🚧 Choosen Template is not here yet! 🚧")
-            }
-            else if (num === 4) {
-                // Update the embed with the new status
-                achievementsData[serverId].templates.messageAchievements.enabled = true;
-                updatedEmbed = new EmbedBuilder(embed)
-                    .setDescription("Templates have been updated.")
-                    .setFields(
-                        { name: "1️⃣ Level-Based Achievements", value: achievementsData[serverId].templates.levelAchievements.enabled ? "Enabled ✅" : "Disabled ❌" },
-                        { name: "2️⃣ Time-Based Achievements", value: "Coming soon 🚧" },
-                        { name: "3️⃣ Event-Based Achievements", value: "Coming soon 🚧" },
-                        { name: "4️⃣ Message-Based Achievements", value: achievementsData[serverId].templates.messageAchievements.enabled ? "Enabled ✅" : "Disabled ❌" }
-                    );
-            }
-            else {
-                updatedEmbed = new EmbedBuilder(embed)
-                    .setTitle("⚠️ No Template Here! ⚠️")
-            }
-        });
-    } else if (input.startsWith("disable")) {
-        templateNumbers.forEach(num => {
-            if (num === 1) {
-                achievementsData[serverId].templates.levelAchievements.enabled = false;
-                // Update the embed with the new status
-                updatedEmbed = new EmbedBuilder(embed)
-                .setDescription("Templates have been updated.")
-                .setFields(
-                    { name: "1️⃣ Level-Based Achievements", value: achievementsData[serverId].templates.levelAchievements.enabled ? "Enabled ✅" : "Disabled ❌" },
-                    { name: "2️⃣ Time-Based Achievements", value: "Coming soon 🚧" },
-                    { name: "3️⃣ Event-Based Achievements", value: "Coming soon 🚧" },
-                    { name: "4️⃣ Message-Based Achievements", value: achievementsData[serverId].templates.messageAchievements.enabled ? "Enabled ✅" : "Disabled ❌" }
-                );
-            }
-            else if (num === 2 || num === 3) {
-                updatedEmbed = new EmbedBuilder(embed)
-                .setTitle("🚧 Choosen Template is not here yet! 🚧")
-            }
-            else if (num === 4) {
-                achievementsData[serverId].templates.messageAchievements.enabled = false;
-                // Update the embed with the new status
-                updatedEmbed = new EmbedBuilder(embed)
-                .setDescription("Templates have been updated.")
-                .setFields(
-                    { name: "1️⃣ Level-Based Achievements", value: achievementsData[serverId].templates.levelAchievements.enabled ? "Enabled ✅" : "Disabled ❌" },
-                    { name: "2️⃣ Time-Based Achievements", value: "Coming soon 🚧" },
-                    { name: "3️⃣ Event-Based Achievements", value: "Coming soon 🚧" },
-                    { name: "4️⃣ Message-Based Achievements", value: achievementsData[serverId].templates.messageAchievements.enabled ? "Enabled ✅" : "Disabled ❌" }
-                );
-            }
-        });
-    } else {
-        return message.channel.send("Invalid input, please use `enable` or `disable` followed by the number of the template you want to select");
-    }
-
-    // Save updated achievements data
-    try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
-        // console.log("Achievements data successfully updated and saved.");
-    } catch (err) {
-        console.error("Error saving achievements data:", err);
-        return message.channel.send("Failed to save achievements data.");
-    }
-
-    return message.channel.send({ embeds: [updatedEmbed], ephemeral: true });
-}
-
-async function trackMessageAchievements(message, achievementsData, saveAchievementsData) {
-    const serverId = message.guild.id;
-    const userId = message.author.id;
-
-    // * Ensure achievements data is set up for this server
-    if (!achievementsData[serverId]) {
-        achievementsData[serverId] = {
-            customAchievements: {
-                levels: {},
-                times: {},
-                events: {}
-            },
-            templates: {
-                messageAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                levelAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                timeAchievements: {
-                    enabled: false,
-                    achievements: {}
-                },
-                eventAchievements: {
-                    enabled: false,
-                    achievements: {}
-                }
-            },
-            users: {}
-        };
-    }
-
-    // * Ensure achievements data is set up for this user
-    const users = achievementsData[serverId].users;
-    if (!users[userId]) {
-        users[userId] = {
-            messagesSent: 0,
-            achievements: [] // * Ensure achievements is an array
-        };
-    }
-
-    const userAchievements = users[userId];
-
-    // ! Only add if enabled
-    if (achievementsData[serverId].templates.messageAchievements.enabled === true) {
-        userAchievements.messagesSent++;
-    }
-
-    // Check for message milestones and give achievements
-    const milestones = {
-        100: 'Casual Typer',
-        1000: 'Pro Typer',
-        10000: 'King of Spam',
-        100000: 'OG Spammer'
-    };
-
-    for (const [messageCount, achievementName] of Object.entries(milestones)) {
-        if (userAchievements.messagesSent >= messageCount && !userAchievements.achievements.includes(achievementName)) {
-            // Award achievement
-            userAchievements.achievements.push(achievementName);
-
-            // Notify user
-            message.channel.send(`<@${userId}> has earned the **${achievementName}** achievement!`);
-        }
-    }
-
-    // Save achievements data
-    try {
-        fs.writeFileSync('json/achievements.json', JSON.stringify(achievementsData, null, 4));
-        // console.log("Achievements data saved.");
-    } catch (err) {
-        console.error("Error saving achievements data:", err);
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ! Don't use
-
-async function handleCustomOptions(message, interaction) {
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle("Custom Achievements")
-        .setDescription("This features is still a work in progress. If you want to see it sooner, vote the bot and leave a review to motivate him! As a sneak peak, here are some of the ideas of the custom achievements")
-        .addFields(
-            { name: "1️⃣ Level-Based Achievements", value: "Customize achievements based on levels." },
-            { name: "2️⃣ Time-Based Achievements", value: "Customize achievements based on time spent in the server." },
-            { name: "3️⃣ Event-Based Achievements", value: "Customize achievements based on events." },
-            { name: "4️⃣ Message-Based Achievements", value: "Customize achievements based on messages."}
-        )
-        .setFooter({ text: "try running a template 👀", iconURL: message.client.user.displayAvatarURL() });
-
-    await message.channel.send({ embeds: [embed] });
-}
-
-async function handleCustomLevelAchievements(message, interaction, serverId, achievementsData, saveAchievementsData, data) {
-    // Check if the server has milestone levels set
-    // const serverId = interaction.guild.id;
-
-    if (!data[serverId].milestoneLevels || data[serverId].milestoneLevels.length === 0) {
-        const response = await message.channel.send("No levels have been set. Would you like to set levels now? (yes/no)");
-
-        const filter = response => response.author.id === message.author.id;
-        const collected = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
-
-        if (!collected || collected.size === 0 || collected.first().content.toLowerCase() !== 'yes') {
-            return message.channel.send("Command cancelled.");
-        }
-
-        await setLevelsCommand(message); // Assuming this command already exists.
-    }
-
-    const levels = data[serverId].milestoneLevels;
-    await message.channel.send("Enter achievement names in the order of the levels you have set.");
-
-    const filter = response => response.author.id === interaction.user.id;
-    const collected = await message.channel.awaitMessages({ filter, max: levels.length, time: 60000 }).catch(() => null);
-
-    if (!collected || collected.size !== levels.length) {
-        return message.channel.send("You did not provide enough achievement names. Command cancelled.");
-    }
-
-    // Ensure correct custom achievements setup for levels
-    const customAchievements = {};
-    collected.forEach((msg, index) => {
-        customAchievements[levels[index]] = msg.content.trim();
-    });
-
-    // Save achievements data
-    achievementsData[serverId].customAchievements.levels = customAchievements;
-    saveAchievementsData();
-
-    // Display confirmation with the set achievements
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle("Custom Level-Based Achievements Set")
-        .addFields(
-            { name: "Level", value: Object.keys(customAchievements).join('\n'), inline: true },
-            { name: "Achievement", value: Object.values(customAchievements).join('\n'), inline: true }
-        );
-
-    return message.channel.send({ embeds: [embed] });
-}
-
-async function handleCustomTimeAchievements(message, interaction, serverId, achievementsData, saveAchievementsData, data) {
-    // Process each entry and validate the format
-    const filter = response => response.author.id === interaction.user.id;
-    const collected = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
-    const timeEntries = collected.first().content.trim().split(',');
-    const customAchievements = {};
-    for (const entry of timeEntries) {
-        const [days, ...achievementArr] = entry.trim().split(' ');
-        const achievementName = achievementArr.join(' ');
-
-        if (isNaN(days) || !achievementName) {
-            return message.channel.send(`Invalid time format for entry: ${entry}. Please use the format 'days achievementName'.`);
-        }
-
-        customAchievements[days.trim()] = achievementName.trim();
-    } 
-
-    // Save custom time-based achievements
-    achievementsData[serverId].customAchievements.times = customAchievements;
-    saveAchievementsData();
-    // Ensure there is some time-based data structure for custom achievements
-    if (!achievementsData[serverId].customAchievements.times) {
-        achievementsData[serverId].customAchievements.times = {};
-    }
-
-    await message.channel.send(
-        "Enter the time ranges in days (separated by commas) and their respective achievement names, one by one. Example: '30 Newbie, 90 Known User, 365 Veteran'"
-    );
-
-    
-
-    
-
-    // Display confirmation embed
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle("Custom Time-Based Achievements Set")
-        .addFields(
-            { name: "Days", value: Object.keys(customAchievements).join('\n'), inline: true },
-            { name: "Achievement", value: Object.values(customAchievements).join('\n'), inline: true }
-        );
-
-    return message.channel.send({ embeds: [embed] });
-}
-
-async function handleCustomEventAchievements(message, interaction, serverId, achievementsData, saveAchievementsData) {
-    // const serverId = interaction.guild.id;
-
-    await interaction.reply(
-        "Enter the events and their respective achievement names, separated by commas.\nExample: `Trivia Champion, Raid Leader, Karaoke Star`"
-    );
-
-    const filter = response => response.author.id === interaction.user.id;  // Corrected to check the user who triggered the interaction
-    const collected = await interaction.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
-
-    const eventNames = collected.first().content.split(',').map(event => event.trim());
-
-    if (!eventNames || eventNames.length === 0) {
-        return interaction.followUp("Invalid input. Please run the command again.");
-    }
-
-    const customAchievements = {};
-    eventNames.forEach((event) => {
-        customAchievements[event] = event;  // Here, you can modify the logic for custom naming
-    });
-
-    achievementsData[serverId].customAchievements.events = customAchievements;
-    saveAchievementsData();
-
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle("Custom Event-Based Achievements Set")
-        .addFields(
-            { name: "Event", value: Object.keys(customAchievements).join('\n'), inline: true },
-            { name: "Achievement", value: Object.values(customAchievements).join('\n'), inline: true }
-        );
-
-    return interaction.followUp({ embeds: [embed] });
-}
-
-function testWriteToAchievementsFile() {
-    const testData = {
-        testKey: "testValue",
-        timestamp: new Date().toISOString()
-    };
-
-    try {
-        fs.writeFileSync("json/serverConfigs.json", JSON.stringify(testData, null, 4));
-        console.log("Test data successfully written to achievements.json.");
-    } catch (err) {
-        console.error("Failed to write to achievements.json:", err);
-    }
-}
-
-// ! create handleCustomTimeAchievements function
-
-// ! create handleCustomEventAchievements function
-
 module.exports = {
     ensureUserData,
     ensureServerData,
     saveData,
-    saveAchievementsData,
     saveBadgesData,
     saveServerConfigsData,
-    addAchievement,
+    saveOwnerData,
     addBadge,
     sendLogMessage,
     sendStatusMessage,
     notifyUpdate,
-    handleTemplateOptions,
-    trackMessageAchievements,
-    handleCustomOptions,
-    handleCustomLevelAchievements,
-    handleCustomTimeAchievements,
-    handleCustomEventAchievements,
-    testWriteToAchievementsFile,
-    debugError
+    getUserData,
+    getBadgesData,
+    getServerConfigsData,
+    getOwnerData,
+    getUserBadges,
+    updateUserBio,
+    isMilestoneLevel,
+    getRolesForLevel,
+    getMilestoneLevels,
+    saveMilestoneLevels,
+    saveRoleForLevel,
+    getMilestoneLevelsFromDB,
+    getRolesFromDB,
+    getBadgesFromDB,
+    getUserBadgesFromDB,
+    addUserBadgeToDB,
+    getRolesData
 };

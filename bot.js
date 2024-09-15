@@ -1,24 +1,11 @@
 const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, ActivityType, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('@discordjs/builders');
 require('dotenv').config();
-const fs = require('fs');
 const { log } = require('console');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
 const rest = new REST({ version: '10' }).setToken(process.env.TEST_TOKEN);
-
-// ? Load Data
-const usersFilePath = 'json/users.json';
-const achievementsFilePath = 'json/achievements.json';
-const badgesFilePath = 'json/badges.json';
-const serverConfigsFilePath = 'json/serverConfigs.json';
-const ownerFilePath = 'json/owner.json';
-
-// ? Load data from the file
-let data = {};
-let achievementsData;
-let badgesData = {};
-let serverConfigsData = {};
-let ownerData = {};
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('./bot.db');
 
 // ? Load command modules
 const adminCommands = require('./commands/admin/admin_commands.js');
@@ -29,68 +16,29 @@ const ownerCommands = require('./commands/owner/owner_commands.js');
 const { ensureUserData,
         ensureServerData,
         saveData,
-        saveAchievementsData,
         saveBadgesData,
         saveServerConfigsData,
-        addAchievement,
+        saveOwnerData,
         addBadge,
         sendLogMessage,
         sendStatusMessage,
         notifyUpdate,
-        handleTemplateOptions,
-        trackMessageAchievements,
-        handleCustomLevelAchievements,
-        debugError } = require("./commands/utils.js");
-
-// ? Load all files
-try {
-    data = JSON.parse(fs.readFileSync(usersFilePath, 'utf8'));
-} catch (err) {
-    console.error("Error reading users.json file:", err);
-}
-
-if (fs.existsSync(achievementsFilePath)) {
-    achievementsData = JSON.parse(fs.readFileSync(achievementsFilePath, 'utf8'));
-} else {
-    achievementsData = {};
-    saveAchievementsData();
-}
-
-if (fs.existsSync(badgesFilePath)) {
-    badgesData = JSON.parse(fs.readFileSync(badgesFilePath, 'utf8'));
-} else {
-    badgesData = {};
-    saveBadgesData();
-}
-
-if (fs.existsSync(serverConfigsFilePath)) {
-    serverConfigsData = JSON.parse(fs.readFileSync(serverConfigsFilePath, 'utf8'));
-} else {
-    serverConfigsData = {};
-    saveServerConfigsData();
-}
-
-if (fs.existsSync(ownerFilePath)) {
-    ownerData = JSON.parse(fs.readFileSync(ownerFilePath, 'utf8'));
-}
+        getUserData,
+        getBadgesData,
+        getServerConfigsData,
+        getOwnerData,
+        getUserBadges,
+        updateUserBio,
+        isMilestoneLevel,
+        getRolesForLevel,
+        getMilestoneLevels,
+        getRolesFromDB,
+        getBadgesFromDB,
+        getUserBadgesFromDB,
+        addUserBadgeToDB,
+        getRolesData } = require("./commands/utils.js");
 
 const cooldowns = new Map();
-
-// * Event listener when bot goes online
-client.on('ready', () => {
-    console.log('Bot is online!');
-    // * Example: Send status update to all servers
-    Object.keys(data).forEach(serverId => {
-        sendStatusMessage(serverId, 'online');
-    });
-});
-
-client.on('shutdown', () => {
-    console.log('Bot is shutting down...');
-    Object.keys(data).forEach(serverId => {
-        sendStatusMessage(serverId, 'offline');
-    });
-});
 
 // * Event listener when bot reconnects
 client.on('shardReconnecting', (shardId) => {
@@ -185,7 +133,7 @@ client.once('ready', async () => {
                     Routes.applicationGuildCommands(client.user.id, guild.id),
                     { body: commands }
                 );
-                console.log(`Successfully registered commands for guild: ${guild.id}`);
+                // console.log(`Successfully registered commands for guild: ${guild.id}`);
             } catch (error) {
                 console.error(`Error registering commands for guild: ${guild.id}`, error);
             }
@@ -199,6 +147,13 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async interaction => {
     const { commandName } = interaction;
+    const serverId = interaction.guild.id;
+    const userId = interaction.member.id;
+
+    const serverConfigsData = await getServerConfigsData(serverId);
+    const badgesData = await getBadgesData(serverId, userId);
+    const ownerData = await getOwnerData(serverId, userId);
+    const data = await getUserData(serverId, userId);
 
     // //
 
@@ -265,14 +220,14 @@ client.on('interactionCreate', async interaction => {
 
     // * Profile
     if (commandName === 'profile') {
-        await communityCommands.slashProfile.execute(interaction, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
+        await communityCommands.slashProfile.execute(interaction, data, badgesData, saveData, saveBadgesData);
     }
 
     // //
 
     // * Set Bio
     if (commandName === 'setbio') {
-        await communityCommands.slashSetBio.execute(interaction, data, achievementsData, badgesData, saveData);
+        await communityCommands.slashSetBio.execute(interaction, data, badgesData, saveData);
     }
 
     // //
@@ -308,8 +263,8 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
 
     if (interaction.customId === 'help_menu') {
-        const serverId = interaction.guild.id;
-        const prefixFinder = serverConfigsData[serverId].prefix;
+        // const serverId = interaction.guild.id;
+        const prefixFinder = serverConfigsData.prefix;
         let embed;
 
         switch (interaction.values[0]) {
@@ -354,8 +309,6 @@ client.on('interactionCreate', async interaction => {
                     • \`${prefixFinder}setprefix\` - Set a custom prefix for the bot.\n
                     • \`${prefixFinder}addxp\` - Add XP to a user.\n
                     • \`${prefixFinder}rmxp\` - Remove XP from a user.\n
-                    • \`${prefixFinder}addachievement\` - Add an achievement to a user.\n
-                    • \`${prefixFinder}rmachievement\` - Remove an achievement from a user.\n
                     • \`${prefixFinder}addbadge\` - Add a badge to a user.\n
                     • \`${prefixFinder}rmbadge\` - Remove a badge from a user.\n
                     • \`${prefixFinder}setbadges\` - Set badges for milestone levels.\n
@@ -400,56 +353,7 @@ client.on('interactionCreate', async interaction => {
             console.error('Attempted to send an embed with missing or invalid fields.');
             await interaction.reply({ content: 'There was an error generating the command list. Please try again later.', ephemeral: true });
         }
-    }
-
-    if (interaction.customId === 'achievements_menu') {
-        const serverId = interaction.guild.id;
-        let embed;
-        try {
-            const serverId = interaction.guild?.id;
-
-            if (!serverId) {
-                return interaction.reply({ content: "This command can only be run in a server", ephemeral: true });
-            }
-
-            switch (interaction.values[0]) {
-                case 'template':
-                    // * Handle the logic to show template options
-                    await handleTemplateOptions(interaction.message, interaction, achievementsData, saveAchievementsData);
-                    break;
-    
-                case 'custom':
-                    // * Handle the logic to show custom achievement options
-                    embed = new EmbedBuilder()
-                        .setColor(0x3498db)
-                        .setTitle("Custom Achievements - COMING SOON")
-                        .setDescription(`This features is still a work in progress.\n
-                            If you want to see it sooner, vote the bot and leave a review to motivate him!\n
-                            As a sneak peak, here are some of the ideas of the custom achievements`)
-                        .addFields(
-                            { name: "1️⃣ Level-Based Achievements", value: "Customize achievements based on levels." },
-                            { name: "2️⃣ Time-Based Achievements", value: "Customize achievements based on time spent in the server." },
-                            { name: "3️⃣ Event-Based Achievements", value: "Customize achievements based on events." },
-                            { name: "4️⃣ Message-Based Achievements", value: "Customize achievements based on messages."}
-                        )
-                        .setFooter({ text: "try running a template instead 👀", iconURL: interaction.client.user.displayAvatarURL() });
-
-                    await interaction.reply({ embeds: [embed] });
-                    break;
-    
-                default:
-                    return;
-            }
-        } catch (error) {
-            console.error('Error occured while handling achie menu interaction', error);
-            await interaction.reply({ content: "An error occured while generating the menu. Please wait" })
-        }
-        
-
-        // Acknowledge the interaction
-        // await interaction.deferReply();
-    }
-    
+    }    
 });
 
 client.on('guildCreate', async (guild) => {
@@ -458,190 +362,143 @@ client.on('guildCreate', async (guild) => {
     // Fetch all members of the guild
     await guild.members.fetch(); // Ensure members are cached
 
-    guild.members.cache.forEach(member => {
+    // Ensure server data is initialized
+    await ensureServerData(serverId, guild);
+
+    // Loop through each member in the guild
+    guild.members.cache.forEach(async (member) => {
         const userId = member.id;
 
         // Ensure the user data exists for this user
-        ensureUserData(serverId, userId);
-        ensureServerData(serverId, guild);
-
-        if (!data[serverId]) {
-            data[serverId] = {
-                users: {},  // Initialize users object for the server
-                roles: {},
-                milestoneLevels: []
-            };
-        }
-
-        // Ensure that the users data is initialized
-        if (!data[serverId].users[userId]) {
-            data[serverId].users[userId] = {
-                xp: 0,
-                level: 1,
-                bio: "",
-                roles: [],
-                totalXp: 0,
-                lastVote: 0
-            };
-        }
-
-        // Ensure achievements data exists for this user
-        if (!achievementsData[serverId]) {
-            achievementsData[serverId] = { users: {} };
-        }
-        if (!achievementsData[serverId].users[userId]) {
-            achievementsData[serverId].users[userId] = { achievements: [] };
-        }
+        await ensureUserData(serverId, userId);
 
         // Ensure badges data exists for this user
-        if (!badgesData[serverId]) {
-            badgesData[serverId] = { badges: {}, users: {} };
-        }
-        if (!badgesData[serverId].users[userId]) {
-            badgesData[serverId].users[userId] = [];
+        const badgesData = await getUserBadges(serverId, userId);
+        if (!badgesData) {
+            await saveBadgesData(serverId, userId, []);
         }
     });
 
-    // Store owner and member information in owner.json
-    ownerData[serverId] = {
-        ownerId: guild.ownerId,  // Use the guild object to get the owner ID
-        memberCount: guild.memberCount  // Use the guild object to get the member count
-    };
+    // Store owner and member information in the database
+    const ownerId = guild.ownerId;
+    const memberCount = guild.memberCount;
 
-    // Write the changes to the files
-    try {
-        fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
-        fs.writeFileSync('./json/achievements.json', JSON.stringify(achievementsData, null, 4));
-        fs.writeFileSync('./json/badges.json', JSON.stringify(badgesData, null, 4));
-        fs.writeFileSync('./json/users.json', JSON.stringify(data, null, 4));
-
-        console.log(`Successfully updated data for guild: ${guild.name}`);
-    } catch (error) {
-        console.error('Error writing to file:', error);
-    }
-    console.log('Owner Data:', ownerData);
-    console.log('Achievements Data:', achievementsData);
-    console.log('Badges Data:', badgesData);
-    console.log('User Data:', data);
+    await saveOwnerData(serverId, ownerId, memberCount);
 
     console.log(`Joined new guild: ${guild.name}`);
+    console.log('Owner Data Saved:', { serverId, ownerId, memberCount });
 });
 
-
 // ! Message handling
-client.on('messageCreate', async message => {
+client.on('messageCreate', async (message) => {
+    const serverId = message.guild.id;
+    const userId = message.author.id;
+    let serverConfigsData = await getServerConfigsData(serverId);
+    let userData = await getUserData(serverId, userId);
+    const badgesData = await getBadgesData(serverId, userId);
+    const ownerData = await getOwnerData(serverId, userId);
+
     try {
+        console.log("Message sent");
         if (!message.guild || message.author.bot) return;
 
-        const serverId = message.guild.id;
-        const userId = message.author.id;
-        const guild = message.guild;
-
-        // Ensure the user data is initialized
-        ensureUserData(serverId, userId); 
-        ensureServerData(serverId, message.guild);
-
-        // Store owner and member information in owner.json
-        ownerData[serverId] = {
-            ownerId: guild.ownerId,  // Use the guild object to get the owner ID
-            memberCount: guild.memberCount  // Use the guild object to get the member count
-        };        
-
-        fs.writeFileSync('./json/owner.json', JSON.stringify(ownerData, null, 4));
-
-        const member = guild.members.cache.get(userId);
-
-        const prefix = serverConfigsData[serverId].prefix || "!";
+        if (!serverConfigsData) {
+            // console.log("Initializing server data...");
+            await ensureServerData(serverId, message.guild);
+            serverConfigsData = await getServerConfigsData(serverId);  // Fetch again after initialization
+        }
+        // console.log("skipped server data...");
+        
+        if (!userData) {
+            // console.log("Initializing user data...");
+            await ensureUserData(serverId, userId);
+            userData = await getUserData(serverId, userId);  // Fetch again after initialization
+        }
+        // console.log("skipped user data...");
+        
+        const member = message.guild.members.cache.get(userId);
+        const prefix = serverConfigsData.prefix || "!";
 
         // Handle XP and leveling
         if (!message.content.startsWith(prefix)) {
-            trackMessageAchievements(message, achievementsData, saveAchievementsData);
             const now = Date.now();
-            const cooldownAmount = 1;  // 60 seconds * 1000
+            const cooldownAmount = 1; // Cooldown set to 1 minute
 
             if (cooldowns.has(userId)) {
                 const expirationTime = cooldowns.get(userId) + cooldownAmount;
-
                 if (now < expirationTime) {
                     const timeLeft = (expirationTime - now) / 1000;
                     console.log(`User ${message.author.username} is on cooldown. ${timeLeft.toFixed(1)} seconds remaining.`);
-                    return; // User is on cooldown, so do not award XP
+                    return;
                 }
             }
 
             cooldowns.set(userId, now);
 
-            const user = data[serverId].users[userId];
+            // Gain XP
             const xpGain = Math.floor(Math.random() * 5) + 5; // Gain 5-10 XP per message
-            user.totalXp += xpGain;  // This tracks all XP gained across all levels.
-            user.xp += xpGain;  // This tracks XP towards the next level.
+            userData.totalXp += xpGain;  // This tracks all XP gained across all levels.
+            userData.xp += xpGain;  // This tracks XP towards the next level.
 
-            const level = user.level;
-            const x = 100;  // Base multiplier
-            const y = 1.1;  // Scaling factor
+            const level = userData.level;
+            const baseMultiplier = 100;
+            const scalingFactor = 1.1;
 
-            const xpNeededForCurrentLevel = Math.floor(level * x * Math.pow(y, level));
-            const xpNeededForNextLevel = Math.floor((level + 1) * x * Math.pow(y, level + 1));
+            const xpNeededForCurrentLevel = Math.floor(level * baseMultiplier * Math.pow(scalingFactor, level));
+            const xpNeededForNextLevel = Math.floor((level + 1) * baseMultiplier * Math.pow(scalingFactor, level + 1));
 
-            // XP required for the next level
             const xpForNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
 
             // Level-up logic
-            if (user.xp >= xpForNextLevel) {
-                user.level++;
-                user.xp = 0;
+            if (userData.xp >= xpForNextLevel) {
+                userData.level++;
+                userData.xp = 0;
 
                 // Send level-up message
-                if (data[serverId].milestoneLevels.includes(level)) {
-                    message.channel.send(`🎉 Congrats <@${message.author.id}>! You've reached level ${level}! This is a milestone level!`);
+                if (await isMilestoneLevel(serverId, userData.level)) {
+                    message.channel.send(`🎉 Congrats <@${message.author.id}>! You've reached level ${userData.level}, a milestone level!`);
                 } else {
-                    message.channel.send(`${message.author.username} leveled up to level ${level}!`);
-                }
+                    message.channel.send(`${message.author.username} leveled up to level ${userData.level}!`);
+                }                
 
                 // Handle role updates if necessary
-                await manageRoles(member, user.level, guild, message);
+                await manageRoles(member, userData.level, message.guild, message);
             }
 
-            // Save data after XP and level calculation
-            saveData();
+            // Save the updated user data
+            await saveData(serverId, userId, userData);
 
-            // Save the updated data
-            try {
-                fs.writeFileSync('json/users.json', JSON.stringify(data, null, 4));
-                // console.log("User data successfully saved.");
-            } catch (err) {
-                console.error("Error saving user data:", err);
-            }
             return;
         }
 
+        // Command handling if the message starts with a prefix
         const args = message.content.slice(prefix.length).trim().split(/ +/g);
         const command = args.shift().toLowerCase();
 
-        // Handle various command categories as usual
+        // Check admin commands
         if (adminCommands[command]) {
-            await adminCommands[command].execute(message, args, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
+            await adminCommands[command].execute(message, args, userData, serverConfigsData, badgesData, saveData, saveBadgesData);
         }
 
-        // * Community commands
+        // Check community commands
         if (communityCommands[command]) {
-            await communityCommands[command].execute(message, args, data, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData);
+            await communityCommands[command].execute(message, args, userData, badgesData, saveData, saveBadgesData);
         }
 
-        // ? Configuration commands
+        // Check configuration commands
         if (configurationCommands[command]) {
-            await configurationCommands[command].execute(message, args, client, data, serverConfigsData, achievementsData, badgesData, saveData, saveAchievementsData, saveBadgesData, saveServerConfigsData);
+            await configurationCommands[command].execute(message, args, client, userData, serverConfigsData, badgesData, saveData, saveBadgesData, saveServerConfigsData);
         }
 
+        // Check owner commands
         if (ownerCommands[command]) {
             await ownerCommands[command].execute(message, client, serverConfigsData, ownerData);
         }
-
+        
     } catch (error) {
         console.error('An error occurred:', error);
 
-        const serverId = message.guild.id;
-        const loggingChannelId = serverConfigsData[serverId]?.loggingChannelId;
+        const loggingChannelId = serverConfigsData.loggingChannelId;
         const logChannel = client.channels.cache.get(loggingChannelId);
 
         if (message.channel.permissionsFor(client.user).has(PermissionsBitField.Flags.SendMessages)) {
@@ -657,43 +514,39 @@ client.on('messageCreate', async message => {
     }
 });
 
-
 async function manageRoles(member, level, guild, message) {
     const serverId = guild.id;
-    ensureServerData(serverId); // * Ensure the server data structure exists
-
-    const roles = data[serverId].roles; // * Fetch the roles for this server
-    const milestoneLevels = data[serverId].milestoneLevels; // * Fetch milestone levels for this server
-    const fixedserver = 1274891590992920628;
 
     try {
-        // * Remove previous roles if the user reaches level 15
-        if (data[serverId] === fixedserver && level === 15 || serverId === fixedserver && level === 15) {
-            for (let lvl of milestoneLevels) {
-                const roleId = roles[lvl];
-                if (roleId && member.roles.cache.has(roleId)) {
-                    await member.roles.remove(roleId);
-                    console.log(`Removed role with ID ${roleId} from ${member.user.username}`);
+        // Fetch roles for the specific level from the database
+        const rolesToAdd = await getRolesForLevel(serverId, level);
+
+        // Add the new role for the current level if it exists
+        if (rolesToAdd.length > 0) {
+            for (const roleId of rolesToAdd) {
+                const role = guild.roles.cache.get(roleId);
+                if (role) {
+                    await member.roles.add(role);
+                    console.log(`Assigned role ${role.name} to ${member.user.username}`);
+                } else {
+                    console.error(`Role with ID ${roleId} not found in the server.`);
                 }
             }
-        }
-
-        // * Add the new role for the current level if it exists
-        const roleId = roles[level];
-        if (roleId) {
-            const role = guild.roles.cache.get(roleId);
-            if (role) {
-                await member.roles.add(role);
-                console.log(`Assigned role ${role.name} to ${member.user.username}`);
-            } else {
-                console.error(`Role with ID ${roleId} not found in the server.`);
-            }
         } else {
-            console.log(`No role configured for level ${level}`);
+            console.log(`No roles configured for level ${level}`);
         }
     } catch (error) {
         console.error(`Failed to manage roles for ${member.user.username}:`, error);
-        // await message.channel.send(`Contact Admin: **Error 71a**`);
+        const embed = new EmbedBuilder()
+                .setColor(0x3498db)
+                .setTitle(`Unable To Assign Role`)
+                .addFields(
+                    { name: "Reason 1", value: "Move me above roles", inline: false },
+                    { name: "Reason 2", value: "Missing Permissions - Add Manage Roles", inline: false }
+                )
+                .setFooter({ text: "If you've done both and it's still not working, contact jaynightmare", iconURL: message.client.user.displayAvatarURL() });
+
+        return message.channel.send({ embeds: [embed] });
     }
 }
 
