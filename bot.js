@@ -13,32 +13,54 @@ const communityCommands = require('./commands/community/community_commands');
 const configurationCommands = require('./commands/configuration/configuration_commands.js');
 const ownerCommands = require('./commands/owner/owner_commands.js');
 
-const { ensureUserData,
-        ensureServerData,
+const { 
+        // User DB:
+        getUserData,
+        getUserDataFromDB,
+        updateUserBio,
         saveData,
-        saveBadgesData,
+
+        // Server DB:
+        getServerConfigsData,
         saveServerConfigsData,
+        saveServerConfig,
+
+        // Owner DB:
+        getOwnerData,
         saveOwnerData,
-        addBadge,
+
+        // Badges DB:
+        getServerBadgesFromDB,
+        getUserBadgesFromDB,
+        getAllBadges,
+        saveServerBadgesData,
+        saveUserBadgesData,
+        addUserBadge,
+        addServerBadge,
+        assignServerBadgeToUser,
+
+        // Roles DB:
+        getRolesData,
+        getRolesFromDB,
+        getRolesForLevel,
+        saveRoleForLevel,
+        saveRoles,
+
+        // Milestone DB:
+        isMilestoneLevel,
+        getMilestoneLevels,
+        getMilestoneLevelsFromDB,
+        saveMilestoneLevels,
+
+        // Ensure Data:
+        ensureServerData,
+        ensureUserData,
+
+        // Other Functions:
         sendLogMessage,
         sendStatusMessage,
-        notifyUpdate,
-        getUserData,
-        getBadgesData,
-        getServerConfigsData,
-        getOwnerData,
-        getUserBadges,
-        updateUserBio,
-        isMilestoneLevel,
-        getRolesForLevel,
-        getMilestoneLevels,
-        getRolesFromDB,
-        getBadgesFromDB,
-        getUserBadgesFromDB,
-        addUserBadgeToDB,
-        getRolesData } = require("./commands/utils.js");
-
-const cooldowns = new Map();
+        notifyUpdate
+} = require("./commands/utils.js");
 
 // * Event listener when bot reconnects
 client.on('shardReconnecting', (shardId) => {
@@ -151,7 +173,7 @@ client.on('interactionCreate', async interaction => {
     const userId = interaction.member.id;
 
     const serverConfigsData = await getServerConfigsData(serverId);
-    const badgesData = await getBadgesData(serverId, userId);
+    const badgesData = await getUserBadgesFromDB(serverId, userId);
     const ownerData = await getOwnerData(serverId, userId);
     const data = await getUserData(serverId, userId);
 
@@ -220,7 +242,7 @@ client.on('interactionCreate', async interaction => {
 
     // * Profile
     if (commandName === 'profile') {
-        await communityCommands.slashProfile.execute(interaction, data, badgesData, saveData, saveBadgesData);
+        await communityCommands.slashProfile.execute(interaction, data, badgesData, saveData);
     }
 
     // //
@@ -371,12 +393,6 @@ client.on('guildCreate', async (guild) => {
 
         // Ensure the user data exists for this user
         await ensureUserData(serverId, userId);
-
-        // Ensure badges data exists for this user
-        const badgesData = await getUserBadges(serverId, userId);
-        if (!badgesData) {
-            await saveBadgesData(serverId, userId, []);
-        }
     });
 
     // Store owner and member information in the database
@@ -384,44 +400,49 @@ client.on('guildCreate', async (guild) => {
     const memberCount = guild.memberCount;
 
     await saveOwnerData(serverId, ownerId, memberCount);
-
-    console.log(`Joined new guild: ${guild.name}`);
-    console.log('Owner Data Saved:', { serverId, ownerId, memberCount });
 });
 
 // ! Message handling
 client.on('messageCreate', async (message) => {
-    const serverId = message.guild.id;
+    const guild = message.guild;
+    const serverId = guild.id;
     const userId = message.author.id;
+    const ownerId = guild.ownerId;
+    const memberCount = guild.memberCount;
+
     let serverConfigsData = await getServerConfigsData(serverId);
     let userData = await getUserData(serverId, userId);
-    const badgesData = await getBadgesData(serverId, userId);
-    const ownerData = await getOwnerData(serverId, userId);
+    let rolesData = await getRolesData(serverId);
+    let badgesData = await getAllBadges(serverId, userId);
+    let ownerData = await getOwnerData(serverId, userId);
+    let milestoneLevelsData = await getMilestoneLevels(serverId);
 
     try {
-        console.log("Message sent");
-        if (!message.guild || message.author.bot) return;
+        // console.log("Message sent");
+        if (!guild || message.author.bot) return;
 
-        if (!serverConfigsData) {
-            // console.log("Initializing server data...");
-            await ensureServerData(serverId, message.guild);
-            serverConfigsData = await getServerConfigsData(serverId);  // Fetch again after initialization
-        }
-        // console.log("skipped server data...");
+        await ensureServerData(serverId, guild, userId);
+        serverConfigsData = await getServerConfigsData(serverId);  // Fetch again after initialization
+        // if (!rolesData || !serverConfigsData || !badgesData || !userData) {
+        // }
         
         if (!userData) {
-            // console.log("Initializing user data...");
             await ensureUserData(serverId, userId);
             userData = await getUserData(serverId, userId);  // Fetch again after initialization
         }
-        // console.log("skipped user data...");
         
-        const member = message.guild.members.cache.get(userId);
+        if (!ownerData) {
+            await saveOwnerData(serverId, ownerId, memberCount);
+            ownerData = await getOwnerData(serverId, ownerId, memberCount);
+        }
+
+        const member = guild.members.cache.get(userId);
         const prefix = serverConfigsData.prefix || "!";
 
         // Handle XP and leveling
         if (!message.content.startsWith(prefix)) {
             const now = Date.now();
+            const cooldowns = new Map();
             const cooldownAmount = 1; // Cooldown set to 1 minute
 
             if (cooldowns.has(userId)) {
@@ -462,7 +483,7 @@ client.on('messageCreate', async (message) => {
                 }                
 
                 // Handle role updates if necessary
-                await manageRoles(member, userData.level, message.guild, message);
+                await manageRoles(member, userData.level, guild, message);
             }
 
             // Save the updated user data
@@ -476,21 +497,24 @@ client.on('messageCreate', async (message) => {
         const command = args.shift().toLowerCase();
 
         // Check admin commands
+        // * NEW FIXED
         if (adminCommands[command]) {
-            await adminCommands[command].execute(message, args, userData, serverConfigsData, badgesData, saveData, saveBadgesData);
+            await adminCommands[command].execute(message, args, client, userData, serverConfigsData, milestoneLevelsData, badgesData, saveData);
         }
 
         // Check community commands
         if (communityCommands[command]) {
-            await communityCommands[command].execute(message, args, userData, badgesData, saveData, saveBadgesData);
+            await communityCommands[command].execute(message, args, userData, badgesData, saveData);
         }
 
         // Check configuration commands
+        // * NEW FIXED
         if (configurationCommands[command]) {
-            await configurationCommands[command].execute(message, args, client, userData, serverConfigsData, badgesData, saveData, saveBadgesData, saveServerConfigsData);
+            await configurationCommands[command].execute(message, args, client);
         }
 
         // Check owner commands
+        // * NEW FIXED
         if (ownerCommands[command]) {
             await ownerCommands[command].execute(message, client, serverConfigsData, ownerData);
         }

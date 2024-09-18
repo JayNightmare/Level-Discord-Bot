@@ -51,29 +51,6 @@ function insertDataIntoSQLite() {
         }
     }
 
-    // Migrate badges.json
-    const badgesData = JSON.parse(fs.readFileSync(`${path}/badges.json`, 'utf8'));
-    for (const serverId in badgesData) {
-        for (const userId in badgesData[serverId] || {}) {
-            const badges = badgesData[serverId][userId];
-            db.run(
-                `INSERT INTO badges (serverId, userId, badgeName, badgeEmoji) 
-                 VALUES (?, ?, ?, ?)`,
-                [
-                    serverId,
-                    userId,
-                    JSON.stringify(badges.name || ""), 
-                    JSON.stringify(badges.emoji || "")
-                ],
-                (err) => {
-                    if (err) {
-                        console.error('Error inserting badges data:', err.message);
-                    }
-                }
-            );
-        }
-    }
-
     // Migrate serverConfigs.json
     const serverConfigsData = JSON.parse(fs.readFileSync(`${path}/serverConfigs.json`, 'utf8'));
     for (const serverId in serverConfigsData) {

@@ -5,54 +5,59 @@ require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('./bot.db');
 
-const { ensureUserData,
-        ensureServerData,
-        saveData,
-        saveBadgesData,
-        saveServerConfigsData,
-        saveOwnerData,
-        addBadge,
-        sendLogMessage,
-        sendStatusMessage,
-        notifyUpdate,
-        getUserData,
-        getBadgesData,
-        getServerConfigsData,
-        getOwnerData,
-        getUserBadges,
-        updateUserBio } = require("../utils.js");
+const { // User DB:
+    getUserData,
+    getUserDataFromDB,
+    updateUserBio,
+    saveData,
 
-const hardcodedBotId = process.env.HARDCODED;
+    // Server DB:
+    getServerConfigsData,
+    saveServerConfigsData,
+    saveServerConfig,
 
-function getRank(userId, serverId) {
-    return new Promise((resolve, reject) => {
-        db.all(`
-            SELECT userId, xp, level 
-            FROM users 
-            WHERE serverId = ? 
-            ORDER BY level DESC, xp DESC
-        `, [serverId], (err, rows) => {
-            if (err) {
-                console.error("Error fetching rank:", err.message);
-                return reject(err);
-            }
+    // Owner DB:
+    getOwnerData,
+    saveOwnerData,
 
-            const rank = rows.findIndex(row => row.userId === userId) + 1;
-            resolve(rank);
-        });
-    });
-}
+    // Badges DB:
+    getServerBadgesFromDB,
+    getUserBadgesFromDB,
+    getAllBadges,
+    saveServerBadgesData,
+    saveUserBadgesData,
+    addUserBadge,
+    addServerBadge,
+    assignServerBadgeToUser,
+
+    // Roles DB:
+    getRolesData,
+    getRolesFromDB,
+    getRolesForLevel,
+    saveRoleForLevel,
+    saveRoles,
+
+    // Milestone DB:
+    isMilestoneLevel,
+    getMilestoneLevels,
+    getMilestoneLevelsFromDB,
+    saveMilestoneLevels,
+
+    // Ensure Data:
+    ensureServerData,
+    ensureUserData,
+
+    // Other Functions:
+    sendLogMessage,
+    sendStatusMessage,
+    notifyUpdate } = require("../utils.js");
 
 async function executeProfile(user, guild, channel) {
     const serverId = guild.id;
     const userId = user.id;
-
-    // Fetch user data from the database
     const userData = await getUserData(serverId, userId);
     const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
-
-    // Fetch badges from the database
-    const userBadges = await getUserBadges(serverId, userId);
+    const userBadges = await getUserBadgesFromDB(serverId, userId);
 
     const bio = userData.bio || "This user hasn't set a bio yet";
 
@@ -64,17 +69,51 @@ async function executeProfile(user, guild, channel) {
 
     // If no badges, show default message
     const badgeDisplay = userBadges.length > 0
-        ? userBadges.map(badge => `${badge.emoji} ${badge.name}`).join(', ')
-        : "No badges";
+    ? userBadges.map(badge => `${badge.badgeEmoji}`).join('\u200B \u200B \u200B')
+    : "No badges";
+
+    const level = userData.level;
+    const baseMultiplier = 100;
+    const scalingFactor = 1.1;
+
+    const xpNeededForCurrentLevel = Math.floor(level * baseMultiplier * Math.pow(scalingFactor, level));
+    const xpNeededForNextLevel = Math.floor((level + 1) * baseMultiplier * Math.pow(scalingFactor, level + 1));
+
+    const xpToNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
+
+    const xpProgress = Math.floor((userData.xp / xpToNextLevel) * 10);
+    const progressBar = '█'.repeat(xpProgress) + '░'.repeat(10 - xpProgress); 
+
+    let embedColor;
+    if (userData.level >= 50) {
+        embedColor = 0xFFD700; // ? Gold for level 50+
+    } else if (userData.level >= 41) {
+        embedColor = 0xE74C3C; // ? Ruby Red for level 41-49
+    } else if (userData.level >= 31) {
+        embedColor = 0xFF69B4; // ? Bright Pink for level 31-40
+    } else if (userData.level >= 21) {
+        embedColor = 0xF1C40F; // ? Bright Yellow for level 21-30
+    } else if (userData.level >= 16) {
+        embedColor = 0x9B59B6; // ? Purple for level 16-20
+    } else if (userData.level >= 11) {
+        embedColor = 0xE67E22; // ? Deep Orange for level 11-15
+    } else if (userData.level >= 6) {
+        embedColor = 0x2ECC71; // ? Emerald Green for level 6-10
+    } else {
+        embedColor = 0x3498DB; // ? Sky Blue for level 1-5
+    }
+
 
     // Create an embed with the user's profile data
     const embed = new EmbedBuilder()
-        .setColor(0x3498db)
+        .setColor(embedColor)
         .setTitle(`${member.displayName}'s Profile`)
         .setDescription(bio)
         .addFields(
             { name: 'Level', value: `${userData.level}`, inline: true },
             { name: 'XP', value: `${userData.xp}`, inline: true },
+            { name: 'Progress', value: `${progressBar} (${userData.xp}/${xpToNextLevel} XP)`, inline: true },
+            // { name: '\u200B', value: '\u200B', inline: true },
             { name: 'Roles', value: roles, inline: true },
             { name: 'Badges', value: badgeDisplay, inline: true }
         )
@@ -247,87 +286,74 @@ async function executeCheckRoles(user, guild, channel) {
     await channel.send({ embeds: [embed] });
 }
 
-async function executeRank(user, guild, channel, data, saveData) {
-    const serverId = guild.id;
-    const userId = user.id;
-
-    // Fetch user data from the database
-    const userData = await getUserData(serverId, userId);
-    if (!userData) {
-        return channel.send("You haven't earned any XP yet!");
-    }
-
-    const level = userData.level;
-    const xp = userData.xp;
-    const x = 100;  // Base multiplier
-    const y = 1.1;  // Scaling factor
-
-    const xpNeededForCurrentLevel = Math.floor(level * x * Math.pow(y, level));
-    const xpNeededForNextLevel = Math.floor((level + 1) * x * Math.pow(y, level + 1));
-
-    // XP required for the next level
-    const xpForNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
-
-    // Await the result of getRank to resolve the promise
-    const rank = await getRank(userId, serverId, data);
-
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle(`${user.username}'s Rank`)
-        .setDescription(`Level: ${level}`)
-        .addFields(
-            { name: 'XP', value: `${xp}/${xpForNextLevel} XP`, inline: true },
-            { name: 'Rank', value: `#${rank}`, inline: true }  // Now rank is awaited
-        )
-        .setThumbnail(user.displayAvatarURL())
-        .setFooter({ text: `Keep chatting to level up!`, iconURL: guild.client.user.displayAvatarURL() });
-
-    await channel.send({ embeds: [embed] });
-}
-
-
-async function getAllUserData(serverId) {
-    return new Promise((resolve, reject) => {
-        db.all(`SELECT * FROM users WHERE serverId = ?`, [serverId], (err, rows) => {
-            if (err) {
-                console.error("Error fetching users:", err.message);
-                return reject(err);
-            }
-            resolve(rows || []);  // Return the list of users or an empty array if none found
-        });
-    });
-}
-
 module.exports = {
-    // * FIXED
+    // * NEW
     rank: {
-        execute: async (message, client, args, saveData) => {
+        execute: async (message) => {
             try {
+                const user = message.author;
+    
                 const serverId = message.guild.id;
-    
-                // Fetch server configuration from the database
+                const guild = message.guild;
                 const serverConfigsData = await getServerConfigsData(serverId);
-                if (!serverConfigsData) {
-                    return message.channel.send("Server configuration not found.");
+                const allowedChannelId = serverConfigsData?.allowedChannel;
+                const allowedChannel = allowedChannelId ? message.guild.channels.cache.get(allowedChannelId) || message.channel : message.channel;
+                
+                if (!allowedChannel) { 
+                    return;
                 }
-    
-                // Fetch all user data from the database
-                const data = await getAllUserData(serverId);
-                if (data.length === 0) {
-                    return message.channel.send("No user data found.");
-                }
-    
-                const allowedChannelId = serverConfigsData.allowedChannel;
-                let allowedChannel = message.channel;
-                if (allowedChannelId && allowedChannelId !== message.channel.id) {
-                    allowedChannel = message.guild.channels.cache.get(allowedChannelId) || await message.guild.channels.fetch(allowedChannelId).catch(() => null);
-                    if (!allowedChannel) {
-                        return message.channel.send("The allowed channel could not be found or fetched.");
+                else {
+                    const userId = user.id;
+                    const userData = await getUserData(serverId, userId);
+                    const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+
+                    const level = userData.level;
+                    const baseMultiplier = 100;
+                    const scalingFactor = 1.1;
+
+                    const xpNeededForCurrentLevel = Math.floor(level * baseMultiplier * Math.pow(scalingFactor, level));
+                    const xpNeededForNextLevel = Math.floor((level + 1) * baseMultiplier * Math.pow(scalingFactor, level + 1));
+
+                    const xpToNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
+
+                    const xpProgress = Math.floor((userData.xp / xpToNextLevel) * 10);
+                    const progressBar = '█'.repeat(xpProgress) + '░'.repeat(10 - xpProgress); 
+
+                    let embedColor;
+                    if (userData.level >= 50) {
+                        embedColor = 0xFFD700; // ? Gold for level 50+
+                    } else if (userData.level >= 41) {
+                        embedColor = 0xE74C3C; // ? Ruby Red for level 41-49
+                    } else if (userData.level >= 31) {
+                        embedColor = 0xFF69B4; // ? Bright Pink for level 31-40
+                    } else if (userData.level >= 21) {
+                        embedColor = 0xF1C40F; // ? Bright Yellow for level 21-30
+                    } else if (userData.level >= 16) {
+                        embedColor = 0x9B59B6; // ? Purple for level 16-20
+                    } else if (userData.level >= 11) {
+                        embedColor = 0xE67E22; // ? Deep Orange for level 11-15
+                    } else if (userData.level >= 6) {
+                        embedColor = 0x2ECC71; // ? Emerald Green for level 6-10
+                    } else {
+                        embedColor = 0x3498DB; // ? Sky Blue for level 1-5
                     }
+
+
+                    // Create an embed with the user's profile data
+                    const embed = new EmbedBuilder()
+                        .setColor(embedColor)
+                        .setTitle(`${member.displayName}'s Profile`)
+                        .addFields(
+                            { name: 'Level', value: `${userData.level}`, inline: true },
+                            { name: 'XP', value: `${userData.xp}`, inline: true },
+                            { name: 'Progress', value: `${progressBar} (${userData.xp}/${xpToNextLevel} XP)`, inline: false }
+                        )
+                        .setThumbnail(user.displayAvatarURL())
+                        .setFooter({ text: `*Tip: Use the /profile or profile command to see your server profile*` });
+
+                    // Send the profile embed to the channel
+                    await message.channel.send({ embeds: [embed] });
                 }
-    
-                // Call shared rank logic
-                await executeRank(message.author, message.guild, allowedChannel, data, saveData);
             } catch (error) {
                 console.error('Error in rank command (prefix):', error);
                 message.channel.send("There was an error retrieving your rank.");
@@ -337,57 +363,98 @@ module.exports = {
 
     // ? Slash
     slashRank: {
-        execute: async (interaction, client, saveData) => {
+        execute: async (interaction) => {
             try {
+                const user = interaction.user;
+    
                 const serverId = interaction.guild.id;
-    
-                // Fetch server configuration from the database
+                const guild = interaction.guild;
                 const serverConfigsData = await getServerConfigsData(serverId);
-                if (!serverConfigsData) {
-                    return interaction.reply("Server configuration not found.");
+                const allowedChannelId = serverConfigsData?.allowedChannel;
+                const allowedChannel = allowedChannelId ? interaction.guild.channels.cache.get(allowedChannelId) || interaction.channel : interaction.channel;
+                
+                if (!allowedChannel) { 
+                    return;
                 }
-    
-                // Fetch all user data from the database
-                const data = await getAllUserData(serverId);
-                if (data.length === 0) {
-                    return interaction.reply("No user data found.");
-                }
-    
-                const allowedChannelId = serverConfigsData.allowedChannel;
-                let allowedChannel = interaction.channel;
-                if (allowedChannelId && allowedChannelId !== interaction.channel.id) {
-                    allowedChannel = interaction.guild.channels.cache.get(allowedChannelId) || await interaction.guild.channels.fetch(allowedChannelId).catch(() => null);
-                    if (!allowedChannel) {
-                        return interaction.reply("The allowed channel could not be found or fetched.");
+                else {
+                    const userId = user.id;
+                    const userData = await getUserData(serverId, userId);
+                    const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+
+                    const level = userData.level;
+                    const baseMultiplier = 100;
+                    const scalingFactor = 1.1;
+
+                    const xpNeededForCurrentLevel = Math.floor(level * baseMultiplier * Math.pow(scalingFactor, level));
+                    const xpNeededForNextLevel = Math.floor((level + 1) * baseMultiplier * Math.pow(scalingFactor, level + 1));
+
+                    const xpToNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
+
+                    const xpProgress = Math.floor((userData.xp / xpToNextLevel) * 10);
+                    const progressBar = '█'.repeat(xpProgress) + '░'.repeat(10 - xpProgress); 
+
+                    let embedColor;
+                    if (userData.level >= 50) {
+                        embedColor = 0xFFD700; // ? Gold for level 50+
+                    } else if (userData.level >= 41) {
+                        embedColor = 0xE74C3C; // ? Ruby Red for level 41-49
+                    } else if (userData.level >= 31) {
+                        embedColor = 0xFF69B4; // ? Bright Pink for level 31-40
+                    } else if (userData.level >= 21) {
+                        embedColor = 0xF1C40F; // ? Bright Yellow for level 21-30
+                    } else if (userData.level >= 16) {
+                        embedColor = 0x9B59B6; // ? Purple for level 16-20
+                    } else if (userData.level >= 11) {
+                        embedColor = 0xE67E22; // ? Deep Orange for level 11-15
+                    } else if (userData.level >= 6) {
+                        embedColor = 0x2ECC71; // ? Emerald Green for level 6-10
+                    } else {
+                        embedColor = 0x3498DB; // ? Sky Blue for level 1-5
                     }
+
+
+                    // Create an embed with the user's profile data
+                    const embed = new EmbedBuilder()
+                        .setColor(embedColor)
+                        .setTitle(`${member.displayName}'s Profile`)
+                        .addFields(
+                            { name: 'Level', value: `${userData.level}`, inline: true },
+                            { name: 'XP', value: `${userData.xp}`, inline: true },
+                            { name: 'Progress', value: `${progressBar} (${userData.xp}/${xpToNextLevel} XP)`, inline: false }
+                        )
+                        .setThumbnail(user.displayAvatarURL())
+                        .setFooter({ text: `*Tip: Use the /profile or profile command to see your server profile*` });
+
+                    // Send the profile embed to the channel
+                    await interaction.reply({ embeds: [embed] });
                 }
-    
-                // Call shared rank logic
-                await executeRank(interaction.user, interaction.guild, allowedChannel, data, saveData);
-    
-                // Acknowledge the interaction
-                await interaction.reply({ content: "Rank retrieved!", ephemeral: true });
             } catch (error) {
                 console.error('Error in rank command (slash):', error);
-                interaction.reply("There was an error retrieving your rank.");
+    
+                // Fallback error message if something goes wrong
+                try {
+                    await interaction.editReply("There was an error retrieving your rank.");
+                } catch (editError) {
+                    console.error("Failed to edit the reply:", editError);
+                }
             }
         }
-    },
+    },             
 
 // //
 
-    // * FIXED
+    // * NEW
     checkroles: {
         execute: async (message) => {
             try {
                 const serverId = message.guild.id;
-    
+
                 // Fetch server configuration from the database
                 const serverConfigsData = await getServerConfigsData(serverId);
                 if (!serverConfigsData) {
                     return message.channel.send("Server configuration not found.");
                 }
-    
+
                 const allowedChannelId = serverConfigsData.allowedChannel;
                 let allowedChannel = message.channel;
                 if (allowedChannelId && allowedChannelId !== message.channel.id) {
@@ -396,7 +463,7 @@ module.exports = {
                         return message.channel.send("The allowed channel could not be found or fetched.");
                     }
                 }
-    
+
                 // Call shared checkroles logic
                 await executeCheckRoles(message.author, message.guild, allowedChannel);
             } catch (error) {
@@ -411,6 +478,8 @@ module.exports = {
         execute: async (interaction) => {
             try {
                 const serverId = interaction.guild.id;
+                const guild = interaction.guild;
+                const user = interaction.user;
     
                 // Fetch server configuration from the database
                 const serverConfigsData = await getServerConfigsData(serverId);
@@ -427,11 +496,20 @@ module.exports = {
                     }
                 }
     
-                // Call shared checkroles logic
-                await executeCheckRoles(interaction.user, interaction.guild, allowedChannel);
-    
-                // Acknowledge the interaction
-                await interaction.reply({ content: "Roles checked!", ephemeral: true });
+                const member = guild.members.cache.get(user.id);
+                const roles = member.roles.cache
+                    .filter(role => role.name !== '@everyone')
+                    .map(role => role.id)
+                    .join(", ");
+
+                const embed = new EmbedBuilder()
+                    .setColor(0x3498db)
+                    .setTitle(`${user.username}'s Roles`)
+                    .setDescription(`<@&${roles}>` || "You don't have any special roles.")
+                    .setThumbnail(user.displayAvatarURL())
+                    .setFooter({ text: "Role Checker", iconURL: guild.client.user.displayAvatarURL() });
+
+                await interaction.reply({ embeds: [embed] });
             } catch (error) {
                 console.error('Error in checkroles command (slash):', error);
                 interaction.reply("There was an error retrieving your roles.");
@@ -441,9 +519,9 @@ module.exports = {
 
 // //
 
-    // * FIXED
+    // * NEW 
     profile: {
-        execute: async (message, args, data, badgesData, saveData, saveBadgesData) => {
+        execute: async (message, data, badgesData, saveData) => {
             try {
                 // Use mentioned user or message author for prefix commands
                 const user = message.mentions.users.first() || message.author;
@@ -455,38 +533,110 @@ module.exports = {
     
                 await executeProfile(user, message.guild, allowedChannel, data, badgesData, saveData);
             } catch (error) {
+                
                 console.error('Error in profile command (prefix): ', error);
-                message.channel.send("There was an error generating this user's profile.");
+                message.channel.send("There was an error generating this profile. Try again in 1 minute");
             }
         },
     },
 
     // ? Slash
     slashProfile: {
-        execute: async (interaction, data, badgesData, saveData, saveBadgesData) => {
+        execute: async (interaction) => {
             try {
                 const user = interaction.options.getUser('user') || interaction.user;
     
                 const serverId = interaction.guild.id;
+                const guild = interaction.guild;
                 const serverConfigsData = await getServerConfigsData(serverId);
                 const allowedChannelId = serverConfigsData?.allowedChannel;
                 const allowedChannel = allowedChannelId ? interaction.guild.channels.cache.get(allowedChannelId) || interaction.channel : interaction.channel;
-    
-                await executeProfile(user, interaction.guild, allowedChannel, data, badgesData, saveData);
-    
-                await interaction.reply({ content: "Profile sent!", ephemeral: true });
+                
+                if (!allowedChannel) { 
+                    return;
+                }
+                else {
+                    const userId = user.id;
+                    const userData = await getUserData(serverId, userId);
+                    const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+                    const userBadges = await getUserBadgesFromDB(serverId, userId);
+
+                    const bio = userData.bio || "This user hasn't set a bio yet";
+
+                    // Display roles the user has (filtering out @everyone)
+                    const roles = member.roles.cache
+                        .filter(role => role.name !== '@everyone')
+                        .map(role => `<@&${role.id}>`)
+                        .join(", ") || "No roles";
+
+                    // If no badges, show default message
+                    const badgeDisplay = userBadges.length > 0
+                    ? userBadges.map(badge => `${badge.badgeEmoji}`).join('\u200B \u200B \u200B')
+                    : "No badges";
+
+                    const level = userData.level;
+                    const baseMultiplier = 100;
+                    const scalingFactor = 1.1;
+
+                    const xpNeededForCurrentLevel = Math.floor(level * baseMultiplier * Math.pow(scalingFactor, level));
+                    const xpNeededForNextLevel = Math.floor((level + 1) * baseMultiplier * Math.pow(scalingFactor, level + 1));
+
+                    const xpToNextLevel = xpNeededForNextLevel - xpNeededForCurrentLevel;
+
+                    const xpProgress = Math.floor((userData.xp / xpToNextLevel) * 10);
+                    const progressBar = '█'.repeat(xpProgress) + '░'.repeat(10 - xpProgress); 
+
+                    let embedColor;
+                    if (userData.level >= 50) {
+                        embedColor = 0xFFD700; // ? Gold for level 50+
+                    } else if (userData.level >= 41) {
+                        embedColor = 0xE74C3C; // ? Ruby Red for level 41-49
+                    } else if (userData.level >= 31) {
+                        embedColor = 0xFF69B4; // ? Bright Pink for level 31-40
+                    } else if (userData.level >= 21) {
+                        embedColor = 0xF1C40F; // ? Bright Yellow for level 21-30
+                    } else if (userData.level >= 16) {
+                        embedColor = 0x9B59B6; // ? Purple for level 16-20
+                    } else if (userData.level >= 11) {
+                        embedColor = 0xE67E22; // ? Deep Orange for level 11-15
+                    } else if (userData.level >= 6) {
+                        embedColor = 0x2ECC71; // ? Emerald Green for level 6-10
+                    } else {
+                        embedColor = 0x3498DB; // ? Sky Blue for level 1-5
+                    }
+
+
+                    // Create an embed with the user's profile data
+                    const embed = new EmbedBuilder()
+                        .setColor(embedColor)
+                        .setTitle(`${member.displayName}'s Profile`)
+                        .setDescription(bio)
+                        .addFields(
+                            { name: 'Level', value: `${userData.level}`, inline: true },
+                            { name: 'XP', value: `${userData.xp}`, inline: true },
+                            { name: 'Progress', value: `${progressBar} (${userData.xp}/${xpToNextLevel} XP)`, inline: true },
+                            // { name: '\u200B', value: '\u200B', inline: true },
+                            { name: 'Roles', value: roles, inline: true },
+                            { name: 'Badges', value: badgeDisplay, inline: true }
+                        )
+                        .setThumbnail(user.displayAvatarURL())
+                        .setFooter({ text: `*Tip: Use the /setbio or !setbio command to update your bio*` });
+
+                    // Send the profile embed to the channel
+                    await interaction.reply({ embeds: [embed] });
+                }
             } catch (error) {
                 console.error('Error in profile command (slash): ', error);
-                interaction.reply("There was an error generating this user's profile.");
+                interaction.reply("There was an error generating this user's profile. There was an error generating this profile. Try again in 1 minute");
             }
         }
     },
 
 // //
     
-    // * FIXED
+    // * NEW
     setbio: {
-        execute: async (message, args, data, badgesData, saveData) => {
+        execute: async (message, data, saveData) => {
             try {
                 const serverId = message.guild.id;
                 const userId = message.author.id;
@@ -536,7 +686,7 @@ module.exports = {
 
     // ? Slash
     slashSetBio: {
-        execute: async (interaction, data, badgesData, saveData) => {
+        execute: async (interaction) => {
             try {
                 const bio = interaction.options.getString('bio');
                 const user = interaction.user;
@@ -550,11 +700,21 @@ module.exports = {
                     allowedChannel = interaction.guild.channels.cache.get(allowedChannelId) || interaction.channel;
                 }
     
-                // Step 2: Save the bio using the shared logic
-                await executeSetBio(user, bio, interaction.guild, allowedChannel, data, saveData);
-    
-                // Acknowledge the interaction
-                await interaction.reply({ content: `Bio updated to: "${bio}"`, ephemeral: true });
+                const userId = user.id;
+
+                // Update the bio in the database
+                await updateUserBio(serverId, userId, bio);
+
+                // Confirmation message
+                const confirmEmbed = new EmbedBuilder()
+                    .setColor(0x00FF00)
+                    .setTitle("Bio Updated")
+                    .setDescription(`Your bio has been successfully updated!`)
+                    .addFields({ name: "Your new bio", value: bio })
+                    .setFooter({ text: `Updated by ${user.username}`, iconURL: user.displayAvatarURL() });
+
+                // Send the confirmation message to the user
+                await interaction.reply({ embeds: [confirmEmbed] });
             } catch (error) {
                 console.error('Error in setbio command (slash): ', error);
                 interaction.reply("There was an error updating your bio.");
@@ -564,9 +724,9 @@ module.exports = {
 
 // //
 
-    // * FIXED
+    // * NEW
     leaderboard: {
-        execute: async (message, args, data, serverConfigsData, saveData) => {
+        execute: async (message, data) => {
             try {
                 const serverId = message.guild.id;
                 const serverConfigsData = await getServerConfigsData(serverId);
@@ -591,9 +751,10 @@ module.exports = {
 
     // ? Slash
     slashLeaderboard: {
-        execute: async (interaction, data, serverConfigsData, saveData) => {
+        execute: async (interaction) => {
             try {
                 const serverId = interaction.guild.id;
+                const guild = interaction.guild;
                 const serverConfigsData = await getServerConfigsData(serverId);
     
                 const allowedChannelId = serverConfigsData?.allowedChannel;
@@ -605,11 +766,66 @@ module.exports = {
                     }
                 }
     
-                // Use shared logic to generate leaderboard
-                await executeLeaderboard(interaction.guild, allowedChannel, data);
-    
-                // Acknowledge the interaction
-                await interaction.reply({ content: "Leaderboard retrieved!", ephemeral: true });
+                // Fetch user data from the database
+                db.all(`
+                    SELECT userId, xp, level
+                    FROM users
+                    WHERE serverId = ?
+                `, [serverId], async (err, rows) => {
+                    if (err) {
+                        console.error("Error fetching leaderboard:", err.message);
+                        return interaction.reply("There was an error retrieving the leaderboard.");
+                    }
+
+                    if (!rows || rows.length === 0) {
+                        return interaction.reply("No one has earned any XP yet!");
+                    }
+
+                    // Fetch members and prepare leaderboard data
+                    const leaderboard = await Promise.all(rows.map(async row => {
+                        let member = guild.members.cache.get(row.userId);
+                        if (!member) {
+                            try {
+                                member = await guild.members.fetch(row.userId); // Fetch member if not cached
+                            } catch (error) {
+                                console.error(`Failed to fetch member with ID: ${row.userId}`);
+                                return null; // Skip users who can't be fetched
+                            }
+                        }
+
+                        return {
+                            displayName: member ? member.displayName : "Unknown User",
+                            level: row.level,
+                            xp: row.xp
+                        };
+                    }));
+
+                    const validLeaderboard = leaderboard.filter(user => user !== null); // Remove null entries
+
+                    // Sort by level and xp
+                    const sortedLeaderboard = validLeaderboard.sort((a, b) => {
+                        if (b.level === a.level) {
+                            return b.xp - a.xp;
+                        }
+                        return b.level - a.level;
+                    }).slice(0, 10); // Limit to top 10
+
+                    // Prepare fields for leaderboard
+                    const usersField = sortedLeaderboard.map((user, index) => `${index + 1}. ${user.displayName}`).join('\n');
+                    const levelsField = sortedLeaderboard.map(user => `${user.level}`).join('\n');
+
+                    // Create leaderboard embed
+                    const leaderboardEmbed = new EmbedBuilder()
+                        .setColor(0x3498db)
+                        .setTitle("Server Leaderboard")
+                        .addFields(
+                            { name: "Top 10", value: usersField, inline: true },
+                            { name: "Level", value: levelsField, inline: true }
+                        )
+                        .setTimestamp();
+
+                    await interaction.reply({ embeds: [leaderboardEmbed] });
+                });
             } catch (error) {
                 console.error('Error in leaderboard command (slash):', error);
                 interaction.reply("There was an error retrieving the leaderboard.");
@@ -619,7 +835,7 @@ module.exports = {
 
 // //
 
-    // * FIXED
+    // * NEW
     // TODO: Add new commands
     help: {
         execute: async (message) => {
@@ -680,7 +896,7 @@ module.exports = {
 
     // * Check if it works via the bot 
     vote: {
-        execute: async (message, args, client) => {
+        execute: async (message, client) => {
             try {
                 const userId = message.author.id;
                 const serverId = message.guild.id;

@@ -1,33 +1,56 @@
-const { PermissionsBitField } = require('discord.js');
+const { PermissionsBitField, resolveBase64 } = require('discord.js');
 const { EmbedBuilder } = require('@discordjs/builders');
-const { ensureUserData,
-        ensureServerData,
+const {     
+        // User DB:
+        getUserData,
+        getUserDataFromDB,
+        updateUserBio,
         saveData,
-        saveBadgesData,
+
+        // Server DB:
+        getServerConfigsData,
         saveServerConfigsData,
+        saveServerConfig,
+
+        // Owner DB:
+        getOwnerData,
         saveOwnerData,
-        addBadge,
+
+        // Badges DB:
+        getServerBadgesFromDB,
+        getUserBadgesFromDB,
+        getAllBadges,
+        saveServerBadgesData,
+        saveUserBadgesData,
+        addUserBadge,
+        addServerBadge,
+        assignServerBadgeToUser,
+
+        // Roles DB:
+        getRolesData,
+        getRolesFromDB,
+        getRolesForLevel,
+        saveRoleForLevel,
+        saveRoles,
+
+        // Milestone DB:
+        isMilestoneLevel,
+        getMilestoneLevels,
+        getMilestoneLevelsFromDB,
+        saveMilestoneLevels,
+
+        // Ensure Data:
+        ensureServerData,
+        ensureUserData,
+
+        // Other Functions:
         sendLogMessage,
         sendStatusMessage,
-        notifyUpdate,
-        getUserData,
-        getBadgesData,
-        getServerConfigsData,
-        getOwnerData,
-        getUserBadges,
-        updateUserBio,
-        isMilestoneLevel,
-        getRolesForLevel,
-        getMilestoneLevels,
-        saveMilestoneLevels,
-        saveRoleForLevel,
-        getMilestoneLevelsFromDB,
-        getRolesFromDB,
-        getBadgesFromDB } = require('../utils');
+        notifyUpdate
+} = require('../utils');
         
-
-// ! REMOVE
-const fs = require('fs');
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('./bot.db');
 
 module.exports = {
     // * FIXED
@@ -36,116 +59,154 @@ module.exports = {
             const serverId = message.guild.id;
             const guild = message.guild;
     
-            // Check if the user has permission to change the prefix
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-                const logChannelId = serverConfigsData[serverId]?.loggingChannelId;
-                const logChannel = message.client.channels.cache.get(logChannelId);
-    
-                if (logChannel) {
-                    logChannel.send(`<@${message.author.id}> tried to change the bot prefix but lacks permissions.`);
-                } else {
-                    console.log(`No logging channel set for ${serverId}`);
-                }
+                const logChannelId = serverConfigsData.loggingChannelId;
+                const logChannel = message.client.channel.cache.get(logChannelId);
+
+                if (logChannel) { logChannel.send(`<@${message.author.id}> tried to change the bot prefix but lacks permissions.`); }
                 return;
             }
-    
-            // Get the new prefix from args
+
             const newPrefix = args[0];
-            if (!newPrefix) {
-                return message.channel.send("Please provide a new prefix.");
+
+            if (!newPrefix) { return message.channel.send("Please provide a new prefix"); }
+            if (typeof newPrefix !== 'string') { return message.channel.send("Invalid prefix. Please provide a valid string"); }
+
+            await ensureServerData(serverId, guild);
+
+            if (!serverConfigsData[serverId]) {
+                // Initialize server config data if it's not present
+                serverConfigsData[serverId] = {
+                    serverId: serverId,
+                    name: guild.name,
+                    blacklistedChannels: [],
+                    allowedChannel: null,
+                    loggingChannelId: null,
+                    prefix: "!", // Default prefix
+                    requireConfirm: false
+                };
             }
-    
-            // Ensure the new prefix is a string
-            if (typeof newPrefix !== 'string') {
-                return message.channel.send("Invalid prefix. Please provide a valid string.");
-            }
-    
-            // Ensure the server configuration data exists
-            ensureServerData(serverId, guild);
-    
-            // Set the new prefix in serverConfigsData
-            serverConfigsData[serverId].prefix = newPrefix;
-    
-            // Save the updated serverConfigsData to the correct file
+
             try {
-                console.log(serverConfigsData);
-                fs.writeFileSync("json/serverConfigs.json", JSON.stringify(serverConfigsData, null, 4));
+                await new Promise((resolve, reject) => {
+                    db.run(
+                        `UPDATE serverConfigsData SET prefix = ? WHERE serverId = ?`,
+                        [newPrefix, serverId],
+                        function (err) {
+                            if (err) {
+                                console.error("Error while updating the new prefix: ", err.message);
+                                return reject(err);
+                            }
+                            resolve();
+                        }
+                    )
+                });
+
+                serverConfigsData[serverId].prefix = newPrefix;
+
+                return message.channel.send(`Prefix has been updated to \`${newPrefix}\``);
             } catch (error) {
-                console.error("Error while saving serverConfigsData:", error);
+                console.error("Error while updating the prefix:", error);
                 return message.channel.send("An error occurred while saving the new prefix.");
             }
-    
-            return message.channel.send(`Prefix has been updated to \`${newPrefix}\``);
-        },
+        }
     },
 
     // * FIXED
     setlevels: {
-        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-                return message.channel.send("You don't have permission to use this command.");
+        execute: async (message, args, milestoneLevelsData) => {
+            if (!message.member.permissions.has('ADMINISTRATOR')) {
+                return message.reply("You don't have permission to use this command.");
             }
-
-            const embed = new EmbedBuilder()
-                .setColor(0x3498db)
-                .setTitle("Set Milestone Levels")
-                .setDescription("Please provide the levels you want to set as milestones, separated by spaces (e.g., `5 10 15`).")
-                .setFooter({ text: "You have 60 seconds to respond." });
-
-            await message.channel.send({ embeds: [embed] });
-
-            const filter = response => response.author.id === message.author.id;
-            const collectedLevels = await message.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
-
-            if (!collectedLevels || collectedLevels.size === 0) {
-                return message.channel.send("You did not respond in time. Please run the command again.");
+    
+            const serverId = message.guild.id;
+    
+            // Ensure milestoneLevelsData exists for the server
+            if (!milestoneLevelsData[serverId]) {
+                await ensureServerData(serverId, message.guild);  // Initialize server data if it doesn't exist
+                milestoneLevelsData[serverId] = await getMilestoneLevels(serverId);  // Fetch the newly created server config
             }
-
-            const levelInput = collectedLevels.first().content;
-            const levels = levelInput.split(' ').map(level => parseInt(level)).filter(level => !isNaN(level)).sort((a, b) => a - b);
-
-            if (levels.length === 0) {
-                return message.channel.send("Invalid input. Please provide valid levels, e.g., `5 10 15`.");
+    
+            // Ensure levels is initialized and parsed correctly
+            let levels = milestoneLevelsData[serverId].level;
+            if (typeof levels === 'string') {
+                levels = JSON.parse(levels || '[]');  // Parse levels if stored as a string
             }
-
-            // Save the levels to the database
-            await saveMilestoneLevels(message.guild.id, levels);
-
-            const confirmationEmbed = new EmbedBuilder()
-                .setColor(0x57f287) // Green for success
-                .setTitle("Milestone Levels Updated")
-                .setDescription(`Milestone levels have been updated to: ${levels.join(', ')}`)
-                .setFooter({ text: "Levels successfully set!" });
-
-            return message.channel.send({ embeds: [confirmationEmbed] });
-        },
-    },
+            if (!Array.isArray(levels)) {
+                levels = [];  // Initialize as an empty array if levels is undefined or not an array
+            }
+    
+            // Parse the levels from the args (user input) and filter out invalid entries
+            const newLevels = args.map(arg => parseInt(arg, 10)).filter(lvl => !isNaN(lvl));
+    
+            let addedLevel = [];
+        
+            // Add new levels that are not already in the list
+            for (const level of newLevels) {
+                if (!levels.includes(`${level}`)) {
+                    let num = level.toString();
+                    levels.push(num);
+                    addedLevel.push(num);
+                } else if (levels.includes(`${level}`)) {
+                    let num = level.toString();
+                    message.channel.send(`Level ${num} already in levels.`);
+                }
+            }
+    
+            if (addedLevel.length > 0) {
+                // Save the levels to the database as a JSON string
+                await new Promise((resolve, reject) => {
+                    db.run(
+                        `UPDATE milestoneLevels SET level = ? WHERE serverId = ?`,
+                        [JSON.stringify(levels), serverId],  // Store levels as a JSON string
+                        function (err) {
+                            if (err) {
+                                return reject(err);
+                            }
+                            resolve();
+                        }
+                    );
+                });
+    
+                milestoneLevelsData[serverId].level = JSON.stringify(levels);  // Save the levels as a string in the cache
+    
+                const addedLevelData = addedLevel.join(", ");
+    
+                // Create and send an embed with the added levels
+                const embed = new EmbedBuilder()
+                    .setColor(0x3498db)
+                    .setTitle("Levels")
+                    .setDescription(`The following levels have been added:`)
+                    .addFields({ name: "Levels", value: addedLevelData })
+                    .setFooter({ text: `Tip: Use /profile to see your server profile.` });
+    
+                return message.channel.send({ embeds: [embed] });
+            } else {
+                // Send an embed if no new levels were added
+                const embed = new EmbedBuilder()
+                    .setColor(0x3498db)
+                    .setTitle("Levels")
+                    .setDescription(`All mentioned levels are already added.`)
+                    .setFooter({ text: `Tip: Use /profile to see your server profile.` });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+        }
+    },                      
         
     // * FIXED
     setroles: {
-        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
+        execute: async (message, args, data, badgesData, saveData, saveBadgesData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
     
-            // Get current milestone levels from the database
-            const milestoneLevels = await getMilestoneLevels(message.guild.id);
-    
-            if (!milestoneLevels || milestoneLevels.length === 0) {
-                return message.channel.send("No milestone levels have been set. Please set milestone levels before assigning roles.");
-            }
-    
+            const serverId = message.guild.id;
+            
             const initialEmbed = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle("Set Roles for Milestone Levels")
-                .setDescription("Respond with the level and role ID you want to update, separated by a space. You can set multiple levels at once by separating them with commas.\n\n**Example:** `5 123456789012345678, 10 123456789012345678, 15 123456789012345678`")
-                .addFields(
-                    {
-                        name: "Current Milestone Levels",
-                        value: milestoneLevels.join(', ') || "No levels set. Run !setlevels to set levels.",
-                        inline: true
-                    }
-                )
+                .setDescription("Respond with the level and role you want to update, separated by a space. You can set multiple levels at once by separating them with commas.\n\n**Example:** `5 @role, 10 @role, 15 @role`")
                 .setFooter({ text: "Use the correct format to update roles.", iconURL: message.client.user.displayAvatarURL() });
     
             await message.channel.send({ embeds: [initialEmbed] });
@@ -166,12 +227,12 @@ module.exports = {
                 }
     
                 // Save the role for the milestone level to the database
-                await saveRoleForLevel(message.guild.id, level, roleId);
+                await saveRoleForLevel(serverId, level, roleId);
                 updatedLevels.push({ level, roleId }); // Store both level and roleId
             }
     
             // Create the confirmation message showing all updated roles
-            const updatedLevelsString = updatedLevels.map(({ level, roleId }) => `${level}: <@&${roleId}>`).join('\n');
+            const updatedLevelsString = updatedLevels.map(({ level, roleId }) => `${level}: ${roleId}`).join('\n');
             const confirmationEmbed = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle("Roles Updated")
@@ -179,11 +240,11 @@ module.exports = {
     
             return message.channel.send({ embeds: [confirmationEmbed] });
         },
-    },    
+    },        
 
     // * FIXED
     viewsettings: {
-        execute: async (message, args, serverConfigsData, badgesData) => {
+        execute: async (message, args, serverConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -191,14 +252,22 @@ module.exports = {
             const serverId = message.guild.id;
     
             // Fetch server configuration from the database
-            const serverConfig = serverConfigsData[serverId] || {};
-    
+            const serverConfig = await getServerConfigsData(serverId) || {};
+
             // Prefix
-            const setPrefix = serverConfig.prefix || "!";  // If not set, fallback to default '!'
+            const setPrefix = serverConfig.prefix || "!";  // Fallback to default '!' if not set
     
-            // Fetch blacklisted channels from the database
-            const blacklistedChannels = serverConfig.blacklistedChannels && serverConfig.blacklistedChannels.length > 0
-                ? serverConfig.blacklistedChannels.map(id => `<#${id}>`).join("\n")
+            // Parse blacklisted channels since it is stored as a string
+            let blacklistedChannelsArray;
+            try {
+                blacklistedChannelsArray = JSON.parse(serverConfig.blacklistedChannels);
+            } catch (error) {
+                blacklistedChannelsArray = [];
+            }
+
+            // Blacklisted Channels
+            const blacklistedChannels = blacklistedChannelsArray && blacklistedChannelsArray.length > 0
+                ? blacklistedChannelsArray.map(id => `<#${id}>`).join(", ")
                 : "No blacklisted channels.";
     
             // Rank Channel
@@ -207,36 +276,57 @@ module.exports = {
                 : "No rank channel set.";
     
             // Log Channel
-            const setlogchannel = serverConfig.loggingChannelId
+            const logChannel = serverConfig.loggingChannelId
                 ? `<#${serverConfig.loggingChannelId}>`
                 : "No log channel set.";
     
-            // Fetch milestone levels from the database
+            // //
+
+            // Level Display
+            // Get the milestone levels from the database
             const milestoneLevels = await getMilestoneLevelsFromDB(serverId);  
-            const levelsDisplay = milestoneLevels && milestoneLevels.length > 0
-                ? milestoneLevels.join(", ")
-                : "No levels set.";
-    
+
+            // Initialize an empty array for displaying levels
+            const levelsString = [];
+
+            // Ensure milestoneLevels is an object and contains the 'level' field
+            if (milestoneLevels && milestoneLevels[0]) {
+                // Parse the 'level' field from the object, as it should be a stringified JSON array
+                const parsedLevels = JSON.parse(milestoneLevels[0].level);
+                
+                // Add the parsed levels to the levelsString array
+                levelsString.push(...parsedLevels);  // Use spread to add multiple elements to the array
+            } else {
+                console.log("No levels found in the database");
+            }
+
+            const levelsDisplay = levelsString.join(', ') || "No levels set";
+
+            // Now levelsDisplay will contain the levels
+            console.log("Levels Display Array:", levelsDisplay);
+
+            // //
+
             // Fetch roles from the database
             const roles = await getRolesFromDB(serverId);  
             const rolesDisplay = roles && roles.length > 0
-                ? roles.map(role => `<@&${role.roleId}>`).join(", ")
+                ? roles.map(role => `${role.roleId}`).join(", ")
                 : "No roles set.";
     
             // Fetch badges from the database
-            const badges = await getBadgesFromDB(serverId);
-            const badgesDisplay = badges && badges.length > 0 
+            const badges = await getServerBadgesFromDB(serverId);
+            const badgesDisplay = badges && badges.badgeName && badges.badgeEmoji > 0 
                 ? badges
                     .filter(badge => badge.badgeName && badge.badgeEmoji)  // Only display badges that have both a name and an emoji set
                     .map(badge => `${badge.badgeEmoji} ${badge.badgeName}`)
                     .join(', ') 
-                : "No badges set.";  // If badges is null, undefined, or empty, show "No badges set."
+                : "No badges set.";  // If badges are null, undefined, or empty, show "No badges set."
     
-            // Prepare embed fields safely, avoiding any undefined values
+            // Prepare embed fields
             const embedFields = [
                 { name: "Blacklisted Channels", value: blacklistedChannels, inline: true },
                 { name: "Rank Channel", value: rankChannel, inline: true },
-                { name: "Log Channel", value: setlogchannel, inline: true },
+                { name: "Log Channel", value: logChannel, inline: true },
                 { name: "Set Levels", value: levelsDisplay, inline: true },
                 { name: "Set Roles", value: rolesDisplay, inline: true },
                 { name: "Badges", value: badgesDisplay, inline: true },
@@ -247,7 +337,7 @@ module.exports = {
             const sanitizedFields = embedFields.map(field => {
                 return {
                     name: field.name,
-                    value: field.value || 'Not set', // If any field value is falsy, set a default message
+                    value: field.value || 'Not Set', // If any field value is falsy, set a default message
                     inline: field.inline || false
                 };
             });
@@ -264,31 +354,45 @@ module.exports = {
     
             return message.channel.send({ embeds: [embed] });
         },
-    },
+    },        
 
     // * FIXED
     blacklist: {
-        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData, saveServerConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
     
             const mentionedChannel = message.mentions.channels.first();
-            const channelIds = mentionedChannel ? mentionedChannel.id : args;
+            const channelIds = mentionedChannel ? [mentionedChannel.id] : args;
+    
             if (channelIds.length === 0) {
                 return message.channel.send("Please provide at least one channel ID to blacklist.");
             }
     
             const serverId = message.guild.id;
+    
+            // Ensure the server configuration exists
+            if (!serverConfigsData[serverId]) {
+                await ensureServerData(serverId, message.guild);  // Initialize server data if it doesn't exist
+                serverConfigsData[serverId] = await getServerConfigsData(serverId);  // Fetch the newly created server config
+            }
+    
+            // Ensure blacklistedChannels is initialized and properly parsed
+            let blacklistedChannels = serverConfigsData[serverId].blacklistedChannels;
+            if (typeof blacklistedChannels === 'string') {
+                blacklistedChannels = JSON.parse(blacklistedChannels || '[]');  // Parse the string into an array
+            }
+    
             let addedChannel = [];
     
-            console.log("Initial blacklistedChannels:", serverConfigsData[serverId].blacklistedChannels);
+            console.log("Initial blacklistedChannels:", blacklistedChannels);
     
             for (const channelId of channelIds) {
                 console.log(`Processing channel ID: ${channelId}`);
     
-                if (!serverConfigsData[serverId].blacklistedChannels.includes(channelId)) {
-                    serverConfigsData[serverId].blacklistedChannels.push(channelId);
+                if (!blacklistedChannels.includes(channelId)) {
+                    blacklistedChannels.push(channelId);
                     addedChannel.push(channelId);
                     console.log(`Channel ID ${channelId} added to blacklist`);
                 } else {
@@ -296,155 +400,338 @@ module.exports = {
                 }
             }
     
-            // Pass serverConfigsData when saving
-            saveServerConfigsData(serverConfigsData);
+            if (addedChannel.length > 0) {
+                // Update the server's blacklisted channels in the database
+                await new Promise((resolve, reject) => {
+                    db.run(
+                        `UPDATE serverConfigsData SET blacklistedChannels = ? WHERE serverId = ?`,
+                        [JSON.stringify(blacklistedChannels), serverId],  // Stringify the array before storing
+                        function (err) {
+                            if (err) {
+                                console.error("Error updating blacklisted channels:", err.message);
+                                return reject(err);
+                            }
+                            resolve();
+                        }
+                    );
+                });
     
-            const addedChannelMention = addedChannel.map(id => `<#${id}>`).join(", ");
-            return message.channel.send(addedChannel.length > 0 ? `Blacklisted channels: ${addedChannelMention}` : "No new channels were blacklisted.");
-        },
-    },       
+                // Update the local cache (serverConfigsData)
+                serverConfigsData[serverId].blacklistedChannels = blacklistedChannels;
+    
+                const addedChannelMention = addedChannel.map(id => `<#${id}>`).join(", ");
+    
+                // Create and send the embed message
+                const embed = new EmbedBuilder()
+                    .setColor(0x3498db)
+                    .setTitle("Channels Blacklisted")
+                    .setDescription(`The following channels were blacklisted:`)
+                    .addFields({ name: "Blacklisted Channels", value: addedChannelMention })
+                    .setFooter({ text: `Use the command again to add more channels to the blacklist.` });
+    
+                return message.channel.send({ embeds: [embed] });
+            } else {
+                // Create and send an embed if no new channels were blacklisted
+                const embed = new EmbedBuilder()
+                    .setColor(0xe74c3c)
+                    .setTitle("No New Channels Blacklisted")
+                    .setDescription(`All mentioned channels are already blacklisted.`)
+                    .setFooter({ text: `Use the command again with different channels.` });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+        }
+    },
 
     // * FIXED
     unblacklist: {
-        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData, saveServerConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-                return message.channel.send("You don't have permission to use this command.");
+                const embed = new EmbedBuilder()
+                    .setColor(0xff0000) // Red for error
+                    .setTitle("Permission Denied")
+                    .setDescription("You don't have permission to use this command.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
             }
-
+    
             const mentionedChannel = message.mentions.channels.first();
-            const channelIds = mentionedChannel ? mentionedChannel.id : args[0];
-            if (channelIds.length === 0) {
-                return message.channel.send("Please provide at least one channel ID to unblacklist.");
+            const channelId = mentionedChannel ? mentionedChannel.id : args[0];
+    
+            if (!channelId) {
+                const embed = new EmbedBuilder()
+                    .setColor(0xffcc00) // Yellow for warning
+                    .setTitle("No Channel Provided")
+                    .setDescription("Please provide a valid channel ID to unblacklist.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
             }
-
+    
             const serverId = message.guild.id;
-            let removedChannels = [];
-            serverConfigsData[serverId].blacklistedChannels = serverConfigsData[serverId].blacklistedChannels.filter(id => {
-                if (channelIds.includes(id)) {
-                    removedChannels.push(id);
-                    return false;
-                }
-                return true;
-            });
-            saveServerConfigsData(serverConfigsData);
-
-            const removedChannelsMention = removedChannels.map(id => `<#${id}>`).join(", ");
-            return message.channel.send(removedChannels.length > 0 ? `Unblacklisted channels: ${removedChannelsMention}` : "No channels were removed from the blacklist.");
+    
+            // Ensure the server config exists, if not initialize it
+            if (!serverConfigsData[serverId]) {
+                const embed = new EmbedBuilder()
+                    .setColor(0xffcc00) // Yellow for warning
+                    .setTitle("Configuration Not Found")
+                    .setDescription("No configuration found for this server.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+    
+            const blacklistedChannels = serverConfigsData[serverId].blacklistedChannels || [];
+    
+            // Check if the channel is in the blacklist
+            if (!blacklistedChannels.includes(channelId)) {
+                const embed = new EmbedBuilder()
+                    .setColor(0xffcc00) // Yellow for warning
+                    .setTitle("Channel Not Blacklisted")
+                    .setDescription(`The channel <#${channelId}> is not blacklisted.`)
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+    
+            // Remove the channel from the blacklist
+            serverConfigsData[serverId].blacklistedChannels = blacklistedChannels.filter(id => id !== channelId);
+    
+            // Save the updated configuration
+            await saveServerConfigsData(serverId, serverConfigsData[serverId]);
+    
+            // Send success embed
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00) // Green for success
+                .setTitle("Channel Unblacklisted")
+                .setDescription(`Successfully removed <#${channelId}> from the blacklist.`)
+                .setFooter({ text: `Unblacklisted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+            return message.channel.send({ embeds: [embed] });
         },
     },
 
     // * FIXED
     setlogchannel: {
-        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
-            const client = message.client;
+        execute: async (message, args, client, data, serverConfigsData) => {
+            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) { return message.channel.send("You don't have permission to use this command."); }
             
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-                return message.channel.send("You don't have permission to use this command.");
-            }
-
+            const serverId = message.guild.id;
             const mentionedChannel = message.mentions.channels.first();
             const channelId = mentionedChannel ? mentionedChannel.id : args[0];
 
-            if (!channelId) {
-                return message.channel.send("Please provide a channel ID to set a log channel.");
+            if (!channelId) { return message.channel.send("Please provide a channel ID to set a log channel."); }
+
+            if (!serverConfigsData[serverId]) {
+                await ensureServerData(serverId, message.guild);
+                serverConfigsData[serverId] = await getServerConfigsData(serverId);
             }
 
-            const serverId = message.guild.id;
             serverConfigsData[serverId].loggingChannelId = channelId;
-            saveServerConfigsData(serverConfigsData);
+
+            await saveServerConfigsData(serverId, serverConfigsData[serverId]);
 
             const logChannel = client.channels.cache.get(channelId);
 
-            await message.channel.send(`Log channel has been set to <#${channelId}>.`);
+            const successEmbed = new EmbedBuilder()
+                .setColor(0x00ff00)
+                .setTitle("Log Channel Set")
+                .setDescription(`Log Channel has been set to <#${channelId}>`)
+                .setFooter({ text: `Command issued by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+
+            await message.channel.send({ embeds: [successEmbed] });
 
             if (logChannel) {
-                await logChannel.send(`This channel has been set to the Leveling Bot Logging channel`)
+                try {
+                    const logChannelEmbed = new EmbedBuilder()
+                        .setColor(0x3498db)
+                        .setTitle("Log Channel Set")
+                        .setDescription(`This channel has been set as the Leveling Bot Logging channel.`)
+                        .setFooter({ text: `Log Channel Update`, iconURL: client.user.displayAvatarURL() });
+    
+                    await logChannel.send({ embeds: [logChannelEmbed] });
+                } catch (err) {
+                    console.error("Error sending message to the log channel:", err);
+    
+                    const errorEmbed = new EmbedBuilder()
+                        .setColor(0xff0000)
+                        .setTitle("Error")
+                        .setDescription("I was unable to send a message to the new log channel. Please ensure I have permission to send messages.")
+                        .setFooter({ text: `Command issued by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                    return message.channel.send({ embeds: [errorEmbed] });
+                }
+            } else {
+                const channelNotFoundEmbed = new EmbedBuilder()
+                    .setColor(0x00ff00)
+                    .setTitle("Channel Not Found")
+                    .setDescription("I can't find the channel you have mentioned. Please make sure that it exists and that I have the permissions to see it")
+                    .setFooter({ text: `Command issued by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+
+                await message.channel.send({ embeds: [channelNotFoundEmbed] });
             }
-        },
+        }
     },
 
     // * FIXED
     unsetlogchannel: {
-        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-                return message.channel.send("You don't have permission to use this command.");
-            }
+        execute: async (message, args, client, data, serverConfigsData) => {
+            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) { return message.channel.send("You don't have permission to use this command."); }
 
             const serverId = message.guild.id;
-            serverConfigsData[serverId].loggingChannelId = null;
-            saveServerConfigsData(serverConfigsData);
 
-            return message.channel.send("Logging channel has been unset.");
-        },
-    },
-
-    // * FIXED
-    setrankchannel: {
-        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
-            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-                return message.channel.send("You don't have permission to use this command.");
+            if (!serverConfigsData[serverId]) {
+                await ensureServerData(serverId, message.guild);
+                serverConfigsData[serverId] = await getServerConfigsData(serverId);
             }
 
+            serverConfigsData[serverId].loggingChannelId = null;
+
+            await saveServerConfigsData(serverId, serverConfigsData[serverId]);
+
+            const embed = new EmbedBuilder()
+                .setColor(0xff0000)
+                .setTitle("Logging Channel Unset")
+                .setDescription("The logging channel has been successfully unset.")
+                .setFooter({ text: `Server: ${message.guild.name}`, iconURL: message.guild.iconURL() });
+
+            await message.channel.send({ embeds: [embed] });
+        }
+    },
+
+    // * 
+    setrankchannel: {
+        execute: async (message, args, data, serverConfigsData) => {
+            if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+                const embed = new EmbedBuilder()
+                    .setColor(0xff0000) // Red color for error
+                    .setTitle("Permission Denied")
+                    .setDescription("You don't have permission to use this command.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+    
             const mentionedChannel = message.mentions.channels.first();
             const channelId = mentionedChannel ? mentionedChannel.id : args[0];
-
+    
             if (!channelId) {
-                return message.channel.send("Please provide a channel ID to set the rank check channel.");
+                const embed = new EmbedBuilder()
+                    .setColor(0xffcc00) // Yellow color for warning
+                    .setTitle("Invalid Input")
+                    .setDescription("Please provide a valid channel ID to set the rank check channel.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
             }
-
+    
             const serverId = message.guild.id;
-
+    
+            // Ensure the server config exists, if not initialize it
+            if (!serverConfigsData[serverId]) {
+                await ensureServerData(serverId, message.guild);
+                serverConfigsData[serverId] = await getServerConfigsData(serverId);
+            }
+    
+            // Set the rank allowed channel
             serverConfigsData[serverId].allowedChannel = channelId;
-            saveServerConfigsData(serverConfigsData);
-
-            return message.channel.send(`Community commands (like \`rank\` and \`profile\`) are now restricted to <#${channelId}>.`);
-        },
-    },
+    
+            // Save the updated server configuration
+            await saveServerConfigsData(serverId, serverConfigsData[serverId]);
+    
+            // Send a confirmation as an embed message
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00) // Green color for success
+                .setTitle("Rank Channel Set")
+                .setDescription(`Community commands (like \`rank\` and \`profile\`) are now restricted to <#${channelId}>.`)
+                .setFooter({ text: `Configured by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+            return message.channel.send({ embeds: [embed] });
+        }
+    },    
 
     // * FIXED
     unsetrankchannel: {
-        execute: (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData) => {
+        execute: async (message, args, data, serverConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
-                return message.channel.send("You don't have permission to use this command.");
+                const embed = new EmbedBuilder()
+                    .setColor(0xff0000) // Red color for error
+                    .setTitle("Permission Denied")
+                    .setDescription("You don't have permission to use this command.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+    
+            const serverId = message.guild.id;
+            const mentionedChannel = message.mentions.channels.first();
+            const channelId = mentionedChannel ? mentionedChannel.id : args[0];
+    
+            // Ensure the server config exists, if not initialize it
+            if (!serverConfigsData[serverId]) {              
+                await ensureServerData(serverId, message.guild);
+                serverConfigsData[serverId] = await getServerConfigsData(serverId);
             }
 
-            const serverId = message.guild.id;
+            if (!channelId) {
+                const embed = new EmbedBuilder()
+                    .setColor(0xffcc00) // Yellow color for warning
+                    .setTitle("Invalid Input")
+                    .setDescription("Please provide a valid channel ID to set the rank check channel.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+                return message.channel.send({ embeds: [embed] });
+            }
+    
+            // Unset the allowed channel
             serverConfigsData[serverId].allowedChannel = null;
-            saveServerConfigsData(serverConfigsData);
+    
+            // Save the updated server configuration
+            await saveServerConfigsData(serverId, serverConfigsData[serverId]);
+    
+            // Send a confirmation as an embed message
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00) // Green color for success
+                .setTitle("Rank Channel Unset")
+                .setDescription("Community Commands are no longer restricted to a specific channel.")
+                .setFooter({ text: `Unset by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+    
+            return message.channel.send({ embeds: [embed] });
+        }
+    },    
 
-            return message.channel.send(`Commands \`!checkrole\` and \`!rank\` are no longer restricted to a specific channel.`);
-        },
-    },
-
-    // * FIXED
+    // * 
     toggleconfirm: {
         execute: async (message, args, client, serverConfigsData) => {
             // Step 1: Check if the user has permission
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-                return message.channel.send("You don't have permission to use this command.");
+                const permissionEmbed = new EmbedBuilder()
+                    .setColor(0xff0000) // Red for error
+                    .setTitle("Permission Denied")
+                    .setDescription("You don't have permission to use this command.")
+                    .setFooter({ text: `Attempted by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+                
+                return message.channel.send({ embeds: [permissionEmbed] });
             }
     
             const serverId = message.guild.id;
     
             // Ensure the server's data exists
-            if (!serverConfigsData[serverId]) {
-                serverConfigsData[serverId] = {
-                    name: message.guild.name,
-                    blacklistedChannels: [],
-                    allowedChannel: null,
-                    loggingChannelId: null,
-                    prefix: "!",
-                    requireConfirm: false // Default setting for confirmation
-                };
+            if (!serverConfigsData[serverId]) {              
+                await ensureServerData(serverId, message.guild);
+                serverConfigsData[serverId] = await getServerConfigsData(serverId);
             }
     
             // Toggle the `requireConfirm` setting
             serverConfigsData[serverId].requireConfirm = !serverConfigsData[serverId].requireConfirm;
-            saveServerConfigsData(serverConfigsData);
+    
+            // Save the updated configuration
+            await saveServerConfigsData(serverId, serverConfigsData[serverId]);
     
             // Create an embedded message to confirm the action
             const embed = new EmbedBuilder()
-                .setColor(0x3498db)
+                .setColor(0x3498db) // Blue for information
                 .setTitle("Confirmation Setting Toggled")
                 .setDescription(`The confirmation setting has been **${serverConfigsData[serverId].requireConfirm ? "enabled" : "disabled"}**.`)
                 .setFooter({ text: `Requested by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
@@ -452,5 +739,5 @@ module.exports = {
             // Send the embedded message
             await message.channel.send({ embeds: [embed] });
         },
-    },
-};
+    }    
+}
