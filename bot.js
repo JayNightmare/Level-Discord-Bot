@@ -4,8 +4,6 @@ require('dotenv').config();
 const { log } = require('console');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
 const rest = new REST({ version: '10' }).setToken(process.env.TEST_TOKEN);
-const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('./bot.db');
 
 // ? Load command modules
 const adminCommands = require('./commands/admin/admin_commands.js');

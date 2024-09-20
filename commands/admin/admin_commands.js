@@ -11,6 +11,8 @@ const {
         getServerConfigsData,
         saveServerConfigsData,
         saveServerConfig,
+        saveServerConfigsPrefix,
+        updateBlacklistToServerConfigsData,
 
         // Owner DB:
         getOwnerData,
@@ -38,6 +40,7 @@ const {
         getMilestoneLevels,
         getMilestoneLevelsFromDB,
         saveMilestoneLevels,
+        saveMilestoneLevelServerId,
 
         // Ensure Data:
         ensureServerData,
@@ -48,9 +51,6 @@ const {
         sendStatusMessage,
         notifyUpdate
 } = require('../utils');
-        
-const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('./bot.db');
 
 module.exports = {
     // * FIXED
@@ -74,33 +74,22 @@ module.exports = {
 
             await ensureServerData(serverId, guild);
 
-            if (!serverConfigsData[serverId]) {
-                // Initialize server config data if it's not present
-                serverConfigsData[serverId] = {
-                    serverId: serverId,
-                    name: guild.name,
-                    blacklistedChannels: [],
-                    allowedChannel: null,
-                    loggingChannelId: null,
-                    prefix: "!", // Default prefix
-                    requireConfirm: false
-                };
-            }
+            // ! JSON File Setup
+            // if (!serverConfigsData[serverId]) {
+            //     // Initialize server config data if it's not present
+            //     serverConfigsData[serverId] = {
+            //         serverId: serverId,
+            //         name: guild.name,
+            //         blacklistedChannels: [],
+            //         allowedChannel: null,
+            //         loggingChannelId: null,
+            //         prefix: "!", // Default prefix
+            //         requireConfirm: false
+            //     };
+            // }
 
             try {
-                await new Promise((resolve, reject) => {
-                    db.run(
-                        `UPDATE serverConfigsData SET prefix = ? WHERE serverId = ?`,
-                        [newPrefix, serverId],
-                        function (err) {
-                            if (err) {
-                                console.error("Error while updating the new prefix: ", err.message);
-                                return reject(err);
-                            }
-                            resolve();
-                        }
-                    )
-                });
+                await saveServerConfigsPrefix(serverId, newPrefix);
 
                 serverConfigsData[serverId].prefix = newPrefix;
 
@@ -155,18 +144,7 @@ module.exports = {
     
             if (addedLevel.length > 0) {
                 // Save the levels to the database as a JSON string
-                await new Promise((resolve, reject) => {
-                    db.run(
-                        `UPDATE milestoneLevels SET level = ? WHERE serverId = ?`,
-                        [JSON.stringify(levels), serverId],  // Store levels as a JSON string
-                        function (err) {
-                            if (err) {
-                                return reject(err);
-                            }
-                            resolve();
-                        }
-                    );
-                });
+                await saveMilestoneLevelServerId(serverId, levels);
     
                 milestoneLevelsData[serverId].level = JSON.stringify(levels);  // Save the levels as a string in the cache
     
@@ -402,19 +380,7 @@ module.exports = {
     
             if (addedChannel.length > 0) {
                 // Update the server's blacklisted channels in the database
-                await new Promise((resolve, reject) => {
-                    db.run(
-                        `UPDATE serverConfigsData SET blacklistedChannels = ? WHERE serverId = ?`,
-                        [JSON.stringify(blacklistedChannels), serverId],  // Stringify the array before storing
-                        function (err) {
-                            if (err) {
-                                console.error("Error updating blacklisted channels:", err.message);
-                                return reject(err);
-                            }
-                            resolve();
-                        }
-                    );
-                });
+                await updateBlacklistToServerConfigsData(serverId, blacklistedChannels);
     
                 // Update the local cache (serverConfigsData)
                 serverConfigsData[serverId].blacklistedChannels = blacklistedChannels;

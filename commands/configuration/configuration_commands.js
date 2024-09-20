@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, ActivityType, InteractionCollector } = require('discord.js');
 const { EmbedBuilder, SelectMenuBuilder, ActionRowBuilder } = require('@discordjs/builders');
-const {// User DB:
+const { // User DB:
         getUserData,
         getUserDataFromDB,
         updateUserBio,
@@ -10,10 +10,13 @@ const {// User DB:
         getServerConfigsData,
         saveServerConfigsData,
         saveServerConfig,
+        getAllServerConfigs,
 
         // Owner DB:
         getOwnerData,
         saveOwnerData,
+        getAllOwnerData,
+        getTopMembersByLevel,
 
         // Badges DB:
         getServerBadgesFromDB,
@@ -45,8 +48,7 @@ const {// User DB:
         // Other Functions:
         sendLogMessage,
         sendStatusMessage,
-        notifyUpdate
-} = require('../utils.js');
+        notifyUpdate } = require('../utils.js');
 
 module.exports = {    
     // * NEW
