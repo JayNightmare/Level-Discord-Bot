@@ -192,16 +192,14 @@ async function executeLeaderboard(guild, channel) {
         }).slice(0, 10); // Limit to top 10
 
         // Prepare fields for leaderboard
-        const usersField = sortedLeaderboard.map((user, index) => `${index + 1}. ${user.displayName}`).join('\n');
-        const levelsField = sortedLeaderboard.map(user => `${user.level}`).join('\n');
+        const usersField = sortedLeaderboard.map((user, index) => `${index + 1}. ${user.displayName} [lvl ${user.level}]`).join('\n');
 
         // Create leaderboard embed
         const leaderboardEmbed = new EmbedBuilder()
             .setColor(0x3498db)
             .setTitle("Server Leaderboard")
             .addFields(
-                { name: "Top 10", value: usersField, inline: true },
-                { name: "Level", value: levelsField, inline: true }
+                { name: "Top 10", value: usersField, inline: true }
             )
             .setTimestamp();
 
@@ -811,16 +809,14 @@ module.exports = {
                     }).slice(0, 10); // Limit to top 10
 
                     // Prepare fields for leaderboard
-                    const usersField = sortedLeaderboard.map((user, index) => `${index + 1}. ${user.displayName}`).join('\n');
-                    const levelsField = sortedLeaderboard.map(user => `${user.level}`).join('\n');
+                    const usersField = sortedLeaderboard.map((user, index) => `${index + 1}. ${user.displayName} [lvl ${user.level}]`).join('\n');
 
                     // Create leaderboard embed
                     const leaderboardEmbed = new EmbedBuilder()
                         .setColor(0x3498db)
                         .setTitle("Server Leaderboard")
                         .addFields(
-                            { name: "Top 10", value: usersField, inline: true },
-                            { name: "Level", value: levelsField, inline: true }
+                            { name: "Top 10", value: usersField, inline: true }
                         )
                         .setTimestamp();
 
@@ -963,7 +959,7 @@ module.exports = {
                 interaction.reply("There was an error processing your vote.");
             }
         }
-    }    
+    },
 
 // //
-};
+}

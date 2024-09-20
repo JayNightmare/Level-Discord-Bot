@@ -55,7 +55,7 @@ const db = new sqlite3.Database('./bot.db');
 module.exports = {
     // * FIXED
     setprefix: {
-        execute: async (message, args, client, serverConfigsData) => {
+        execute: async (message, args, serverConfigsData) => {
             const serverId = message.guild.id;
             const guild = message.guild;
     
@@ -196,7 +196,7 @@ module.exports = {
         
     // * FIXED
     setroles: {
-        execute: async (message, args, data, badgesData, saveData, saveBadgesData) => {
+        execute: async (message) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -244,7 +244,7 @@ module.exports = {
 
     // * FIXED
     viewsettings: {
-        execute: async (message, args, serverConfigsData) => {
+        execute: async (message) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -358,7 +358,7 @@ module.exports = {
 
     // * FIXED
     blacklist: {
-        execute: async (message, args, data, serverConfigsData, badgesData, saveData, saveBadgesData, saveServerConfigsData) => {
+        execute: async (message, args, serverConfigsData,) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 return message.channel.send("You don't have permission to use this command.");
             }
@@ -445,7 +445,7 @@ module.exports = {
 
     // * FIXED
     unblacklist: {
-        execute: async (message, args, data, serverConfigsData, saveServerConfigsData) => {
+        execute: async (message, args, serverConfigsData, saveServerConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 const embed = new EmbedBuilder()
                     .setColor(0xff0000) // Red for error
@@ -514,7 +514,7 @@ module.exports = {
 
     // * FIXED
     setlogchannel: {
-        execute: async (message, args, client, data, serverConfigsData) => {
+        execute: async (message, args, client, serverConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) { return message.channel.send("You don't have permission to use this command."); }
             
             const serverId = message.guild.id;
@@ -576,7 +576,7 @@ module.exports = {
 
     // * FIXED
     unsetlogchannel: {
-        execute: async (message, args, client, data, serverConfigsData) => {
+        execute: async (message, serverConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) { return message.channel.send("You don't have permission to use this command."); }
 
             const serverId = message.guild.id;
@@ -602,7 +602,7 @@ module.exports = {
 
     // * 
     setrankchannel: {
-        execute: async (message, args, data, serverConfigsData) => {
+        execute: async (message, args, serverConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 const embed = new EmbedBuilder()
                     .setColor(0xff0000) // Red color for error
@@ -653,7 +653,7 @@ module.exports = {
 
     // * FIXED
     unsetrankchannel: {
-        execute: async (message, args, data, serverConfigsData) => {
+        execute: async (message, args, serverConfigsData) => {
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
                 const embed = new EmbedBuilder()
                     .setColor(0xff0000) // Red color for error
@@ -703,7 +703,7 @@ module.exports = {
 
     // * 
     toggleconfirm: {
-        execute: async (message, args, client, serverConfigsData) => {
+        execute: async (message, serverConfigsData) => {
             // Step 1: Check if the user has permission
             if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
                 const permissionEmbed = new EmbedBuilder()

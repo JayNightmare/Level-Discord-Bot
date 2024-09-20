@@ -433,7 +433,7 @@ module.exports = {
 
     // * NEW
     viewbadges: {
-        execute: async (message, args, client) => {
+        execute: async (message) => {
             const serverId = message.guild.id;
             const mentionedUser = message.mentions.users.first() || message.author; // Either get mentioned user or the author themselves
             const userId = mentionedUser.id;
@@ -457,7 +457,7 @@ module.exports = {
             // Step 3: Compare badges (server vs. user)
             const badgesComparison = serverBadges.map(badge => {
                 const hasBadge = userBadgeNames.includes(badge.badgeName);
-                const badgeStatus = hasBadge ? `✅ - ${badge.badgeEmoji} ${badge.badgeName}` : `❌ - ${badge.badgeEmoji} ${badge.badgeName}`;
+                const badgeStatus = hasBadge ? `✅ - ${badge.badgeEmoji} ${badge.badgeName} [${badge.level}]` : `❌ - ${badge.badgeEmoji} ${badge.badgeName} [${badge.level}]`;
                 return badgeStatus;
             }).join('\n');
     

@@ -277,13 +277,30 @@ async function saveUserBadgesData(serverId, userId, badgesData) {
 
 // Add or update a user-specific badge
 async function addUserBadge(serverId, userId, badgeName, badgeEmoji) {
-    const badgesData = [{
-        badgeName: badgeName,
-        badgeEmoji: badgeEmoji
-    }];
+    try {
+        // Get the user's existing badges
+        const existingBadges = await getUserBadgesFromDB(serverId, userId);
 
-    await saveUserBadgesData(serverId, userId, badgesData);
-    console.log(`Badge ${badgeName} with emoji ${badgeEmoji} has been added for user ${userId} in server ${serverId}`);
+        // Check if the user already has this badge
+        const hasBadge = existingBadges.some(badge => badge.badgeName === badgeName);
+
+        if (hasBadge) {
+            console.log(`User ${userId} already has the badge ${badgeName}`);
+            return;  // Do nothing if the user already has the badge
+        }
+
+        // Prepare badge data to be added
+        const badgesData = [{
+            badgeName: badgeName,
+            badgeEmoji: badgeEmoji
+        }];
+
+        // Save the badge to the database
+        await saveUserBadgesData(serverId, userId, badgesData);
+        console.log(`Badge ${badgeName} with emoji ${badgeEmoji} has been added for user ${userId} in server ${serverId}`);
+    } catch (error) {
+        console.error(`Error adding badge for user ${userId}:`, error);
+    }
 }
 
 // Add or update a server-wide badge
@@ -374,6 +391,7 @@ function getRolesForLevel(serverId, userLevel) {
     });
 }
 
+
 function saveRoleForLevel(serverId, levelRequired, roleId) {
     return new Promise((resolve, reject) => {
         db.run(`
@@ -415,9 +433,19 @@ async function saveRoles(serverId, rolesData) {
 // * Is level in DB
 async function isMilestoneLevel(serverId, level) {
     return new Promise((resolve, reject) => {
-        db.get(`SELECT level FROM milestoneLevels WHERE serverId = ? AND level = ?`, [serverId, level], (err, row) => {
-            if (err) return reject(err);
-            resolve(!!row); // Return true if the level is a milestone
+        db.get(`SELECT level FROM milestoneLevels WHERE serverId = ?`, [serverId], (err, row) => {
+            if (err) {
+                console.error(`Error checking milestone level for server ${serverId} and level ${level}:`, err);
+                return reject(err);
+            }
+
+            if (row && row.level) {
+                const milestoneLevels = JSON.parse(row.level); // Parse the JSON array
+                console.log(`Checking if level ${level} is a milestone:`, milestoneLevels.includes(level.toString()));
+                resolve(milestoneLevels.includes(level.toString())); // Compare as strings
+            } else {
+                resolve(false); // No milestone levels found
+            }
         });
     });
 }

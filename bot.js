@@ -137,6 +137,12 @@ const commands = [
     new SlashCommandBuilder()
     .setName('rank')
     .setDescription('View your current rank and XP'),
+
+    // //
+
+    new SlashCommandBuilder()
+    .setName('topgg')
+    .setDescription('Post stats to topgg'),
 ];
 
 client.once('ready', async () => {
@@ -278,6 +284,10 @@ client.on('interactionCreate', async interaction => {
     // * Rank
     if (commandName === 'rank') {
         await communityCommands.slashRank.execute(interaction, client, saveData);
+    }
+
+    if (commandName === 'topgg') {
+        await ownerCommands.topgg.execute(interaction, client);
     }
 
     // * 
@@ -423,8 +433,6 @@ client.on('messageCreate', async (message) => {
 
         await ensureServerData(serverId, guild, userId);
         serverConfigsData = await getServerConfigsData(serverId);  // Fetch again after initialization
-        // if (!rolesData || !serverConfigsData || !badgesData || !userData) {
-        // }
         
         if (!userData) {
             await ensureUserData(serverId, userId);
@@ -475,20 +483,22 @@ client.on('messageCreate', async (message) => {
                 userData.level++;
                 userData.xp = 0;
 
+                console.log(`User leveled up to ${userData.level}`);
+
                 // Send level-up message
                 if (await isMilestoneLevel(serverId, userData.level)) {
+                    console.log(`User reached a milestone level: ${userData.level}`);
                     message.channel.send(`🎉 Congrats <@${message.author.id}>! You've reached level ${userData.level}, a milestone level!`);
                 } else {
                     message.channel.send(`${message.author.username} leveled up to level ${userData.level}!`);
                 }                
-
-                // Handle role updates if necessary
-                await manageRoles(member, userData.level, guild, message);
             }
+            
+            // Handle role and badge updates if necessary
+            await manageRoles(member, userData.level, guild, message);
+            await manageBadges(serverId, userData.level, member, message);
 
-            // Save the updated user data
             await saveData(serverId, userId, userData);
-
             return;
         }
 
@@ -499,7 +509,7 @@ client.on('messageCreate', async (message) => {
         // Check admin commands
         // * NEW FIXED
         if (adminCommands[command]) {
-            await adminCommands[command].execute(message, args, client, userData, serverConfigsData, milestoneLevelsData, badgesData, saveData);
+            await adminCommands[command].execute(message, args, client, userData, serverConfigsData, milestoneLevelsData);
         }
 
         // Check community commands
@@ -540,18 +550,21 @@ client.on('messageCreate', async (message) => {
 
 async function manageRoles(member, level, guild, message) {
     const serverId = guild.id;
-
     try {
         // Fetch roles for the specific level from the database
         const rolesToAdd = await getRolesForLevel(serverId, level);
+        console.log(`Roles to add for level ${level}:`, rolesToAdd);  // Log the roles to add
 
         // Add the new role for the current level if it exists
         if (rolesToAdd.length > 0) {
-            for (const roleId of rolesToAdd) {
+            for (let roleId of rolesToAdd) {
+                // Ensure we are using a raw role ID (remove mention formatting if any)
+                roleId = roleId.replace(/[<@&>]/g, ''); // Strip out any <@& or > from the role ID
+
                 const role = guild.roles.cache.get(roleId);
                 if (role) {
+                    console.log(`Assigning role: ${role.name} to ${member.user.username}`);
                     await member.roles.add(role);
-                    console.log(`Assigned role ${role.name} to ${member.user.username}`);
                 } else {
                     console.error(`Role with ID ${roleId} not found in the server.`);
                 }
@@ -571,6 +584,31 @@ async function manageRoles(member, level, guild, message) {
                 .setFooter({ text: "If you've done both and it's still not working, contact jaynightmare", iconURL: message.client.user.displayAvatarURL() });
 
         return message.channel.send({ embeds: [embed] });
+    }
+}
+
+async function manageBadges(serverId, level, member, message) {
+    try {
+        // Fetch all badges associated with the server
+        const serverBadges = await getServerBadgesFromDB(serverId);
+
+        // Loop through all server badges and check if the user qualifies for any
+        for (const badge of serverBadges) {
+            if (badge.level === level) {  // If badge is linked to this level
+                // Check if the user already has this badge
+                const userBadges = await getUserBadgesFromDB(serverId, member.user.id);
+                const hasBadge = userBadges.some(userBadge => userBadge.badgeName === badge.badgeName);
+
+                if (!hasBadge) {
+                    await addUserBadge(serverId, member.user.id, badge.badgeName, badge.badgeEmoji);
+
+                    // Notify the user about the new badge
+                    await message.channel.send(`🎉 Congrats <@${member.user.id}>! You've earned the ${badge.badgeEmoji} **${badge.badgeName}** badge for reaching level ${level}!`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error("Error managing badges:", error);
     }
 }
 
