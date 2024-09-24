@@ -1042,7 +1042,7 @@ module.exports = {
     ensureServerData,
     ensureUserData,
 
-    // * Execute Commands Data:
+    // Execute Commands Data:
     executeProfile,
     executeSetBio,
     executeLeaderboard,

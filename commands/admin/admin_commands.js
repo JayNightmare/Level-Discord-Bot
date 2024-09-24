@@ -218,7 +218,7 @@ module.exports = {
     
             return message.channel.send({ embeds: [confirmationEmbed] });
         },
-    },        
+    },
 
     // * FIXED
     viewsettings: {
@@ -288,18 +288,19 @@ module.exports = {
             // Fetch roles from the database
             const roles = await getRolesFromDB(serverId);  
             const rolesDisplay = roles && roles.length > 0
-                ? roles.map(role => `${role.roleId}`).join(", ")
-                : "No roles set.";
+                ? roles.map(role => `[${role.levelRequired}] ${role.roleId}`).join("\n")
+                : "No roles set";
     
             // Fetch badges from the database
             const badges = await getServerBadgesFromDB(serverId);
-            const badgesDisplay = badges && badges.badgeName && badges.badgeEmoji > 0 
-                ? badges
-                    .filter(badge => badge.badgeName && badge.badgeEmoji)  // Only display badges that have both a name and an emoji set
-                    .map(badge => `${badge.badgeEmoji} ${badge.badgeName}`)
-                    .join(', ') 
-                : "No badges set.";  // If badges are null, undefined, or empty, show "No badges set."
-    
+            let badgesDisplay;
+            if (badges && badges[0]) {
+                badgesDisplay = badges.map(badge => `[${badge.level}] ${badge.badgeEmoji} ${badge.badgeName}`).join('\n');
+            }
+            else {
+                badgesDisplay = 'No badges set'
+            }
+
             // Prepare embed fields
             const embedFields = [
                 { name: "Blacklisted Channels", value: blacklistedChannels, inline: true },
